@@ -172,7 +172,7 @@ Edit these with extra caution — bugs here caused real deployment failures:
 | Direct SSH deploy | `uv run sunbeam-deployer --device-ip <IP>` |
 | Re-run single phase | `uv run sunbeam-deployer --device-ip <IP> --phase <phase>` |
 | Verbose output | Add `-v` to any command |
-| Cancel TF job on failure | Add `--cancel-on-failure` |
+| Auto-cancel TF job on failure | Add `--cancel-on-failure` |
 
 Phases run in order: `testflinger` (~5-30 min) → `host-setup` (~5 min) → `vm-deploy` (~5 min) → `cluster` (~1.5 hr). Total: ~1.5-2 hours for 3 nodes.
 
@@ -198,4 +198,9 @@ lxc exec bm0 -- cat /home/ubuntu/snap/openstack/common/logs/sunbeam.log
 lxc exec bm0 -- sudo -iu ubuntu sunbeam cluster list
 ```
 
-Cancel Testflinger jobs when done: `testflinger cancel <UUID>`. Jobs expire after `reserve_timeout` (default 3 days).
+### Post-Deployment Job Handling
+
+- **Submitted jobs** (`--testflinger` or `--tf-job-file`): After success, the tool prompts `Cancel Testflinger job <UUID> and release the machine? [y/N]`. Default is No (keep alive).
+- **Attached jobs** (`--tf-job-id`): No prompt — logs the job ID and how to cancel manually.
+- **`--cancel-on-failure`**: Auto-cancels on failure without prompting.
+- Manual cancel: `testflinger cancel <UUID>`. Jobs expire after `reserve_timeout` (default 3 days).

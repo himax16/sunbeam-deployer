@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 
 from sunbeam_deployer import __version__
@@ -165,6 +166,25 @@ def apply_cli_overrides(cfg: DeployConfig, args: argparse.Namespace) -> None:
         cfg.logging.verbose = True
 
 
+def _prompt_cancel_job(logger: logging.Logger, job_id: str) -> None:
+    """Interactively ask whether to cancel a Testflinger job we submitted."""
+    logger.info("Testflinger job: %s", job_id)
+    try:
+        answer = input(
+            f"\nCancel Testflinger job {job_id} and release the machine? [y/N] "
+        ).strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        answer = ""
+        print()
+
+    if answer in ("y", "yes"):
+        testflinger.cancel_job(job_id)
+    else:
+        logger.info(
+            "Job kept alive. Cancel manually: testflinger cancel %s", job_id
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -196,13 +216,18 @@ def main(argv: list[str] | None = None) -> int:
     mon = DeploymentMonitor()
     phase = args.phase
     infra = None
+    # Track whether we submitted the TF job (vs. attaching to existing)
+    submitted_job = False
 
     try:
         # Phase 0: Testflinger provisioning (or direct SSH)
         direct_ip = getattr(cfg, "_direct_ip", None)
 
         if phase in ("all", "testflinger") and cfg.testflinger.enabled:
+            pre_job_id = cfg.testflinger.job_id
             testflinger.run_phase(cfg, mon)
+            if not pre_job_id and cfg.testflinger.job_id:
+                submitted_job = True
         elif direct_ip:
             # --device-ip: skip testflinger, set up SSH directly
             from sunbeam_deployer.executor import wait_for_ssh
@@ -254,15 +279,18 @@ def main(argv: list[str] | None = None) -> int:
         print(mon.summary())
         return 1
 
-    # Print connection info if we're on a testflinger/remote machine
-    if cfg.testflinger.job_id:
+    print(mon.summary())
+
+    # Post-deployment: prompt to cancel if we submitted the job
+    if submitted_job and cfg.testflinger.job_id:
+        _prompt_cancel_job(logger, cfg.testflinger.job_id)
+    elif cfg.testflinger.job_id:
         logger.info(
             "Testflinger job: %s (use 'testflinger cancel %s' to release)",
             cfg.testflinger.job_id,
             cfg.testflinger.job_id,
         )
 
-    print(mon.summary())
     return 0
 
 

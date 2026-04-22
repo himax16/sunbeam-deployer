@@ -718,9 +718,21 @@ reserve_data:
 
 - **Jobs time out**: The `reserve_timeout` controls how long you have the machine.
   Default is 3 days (259200 seconds).
-- **Cancel releases the machine**: Always cancel jobs when done to free resources.
 - **Job IDs are UUIDs**: e.g. `97c62a00-2522-414b-b296-1fe77a6bbd99`
-- **The `--cancel-on-failure` flag** automatically cancels the job if deployment fails.
+
+### Post-Deployment Job Handling
+
+- **Submitted jobs** (via `--testflinger` or `--tf-job-file`): After a successful
+  deployment, the tool prompts interactively:
+  ```
+  Cancel Testflinger job <UUID> and release the machine? [y/N]
+  ```
+  Default is **No** — the machine stays alive for inspection or further work.
+- **Attached jobs** (via `--tf-job-id`): No prompt. The tool logs the job ID and
+  how to cancel manually (`testflinger cancel <UUID>`).
+- **`--cancel-on-failure`**: Automatically cancels the job on deployment failure
+  without prompting. Only applies to failure scenarios.
+- **Manual cancel**: `testflinger cancel <UUID>` releases the machine at any time.
 
 ---
 
@@ -845,7 +857,7 @@ Testflinger:
   --tf-job-file FILE         Submit this job YAML
   --tf-ssh-key PATH          SSH private key for the machine
   --device-ip IP             Skip Testflinger, SSH directly to this IP
-  --cancel-on-failure        Cancel Testflinger job if deployment fails
+  --cancel-on-failure        Auto-cancel Testflinger job if deployment fails
 
 Snap:
   --snap-channel CHANNEL     Override snap channel (sets source=store)
@@ -954,7 +966,11 @@ To operate this deployment tool, an LLM agent needs the following capabilities:
    a. Parse the summary output for success/failure
    b. If success: run verification checks
    c. If failure: identify failed phase, attempt recovery
-6. Report results with:
+6. Handle post-deployment cancel prompt:
+   - If the job was submitted by the tool, it will prompt to cancel.
+   - Answer "y" to release the machine, or "N" to keep it alive.
+   - For attached jobs (--tf-job-id), cancel manually when done.
+7. Report results with:
    - Overall status (success/failure)
    - Duration per phase
    - Any errors encountered
