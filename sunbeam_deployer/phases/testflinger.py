@@ -151,8 +151,29 @@ def _submit_job(cfg: DeployConfig, mon: DeploymentMonitor) -> str:
         return job_id
 
 
+def _snap_tmp_dir() -> str:
+    """Return a temp directory the testflinger-cli snap can read.
+
+    The snap has private ``/tmp`` so host-created files in
+    ``/tmp`` are invisible to it.  Instead we use the snap's
+    user-common directory which is always accessible.
+    """
+    d = os.path.join(
+        os.path.expanduser("~"),
+        "snap",
+        "testflinger-cli",
+        "common",
+        "tmp",
+    )
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
 def _generate_job_yaml(cfg: DeployConfig) -> str:
     """Generate a testflinger reserve-job YAML and return its path.
+
+    The file is written to the ``testflinger-cli`` snap's
+    user-common tmp directory so the snap process can read it.
 
     Fields follow the schema at:
     https://canonical-testflinger.readthedocs-hosted.com/latest/reference/job-schema/
@@ -160,7 +181,7 @@ def _generate_job_yaml(cfg: DeployConfig) -> str:
     tf = cfg.testflinger
     job_data: dict = {
         "job_queue": tf.queue,
-        # Safety net: allow the full reservation plus 1h for provisioning
+        # Safety net: reservation plus 1h for provisioning
         "global_timeout": tf.reserve_timeout + 3600,
         # 15 min output timeout is the default; be explicit
         "output_timeout": 900,
@@ -175,7 +196,11 @@ def _generate_job_yaml(cfg: DeployConfig) -> str:
     if tf.ssh_keys:
         job_data["reserve_data"]["ssh_keys"] = tf.ssh_keys
 
-    fd, path = tempfile.mkstemp(suffix=".yaml", prefix="testflinger-job-")
+    fd, path = tempfile.mkstemp(
+        suffix=".yaml",
+        prefix="testflinger-job-",
+        dir=_snap_tmp_dir(),
+    )
     with os.fdopen(fd, "w") as fh:
         yaml.safe_dump(job_data, fh, default_flow_style=False)
 
