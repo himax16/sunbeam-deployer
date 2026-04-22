@@ -11,3 +11,6 @@ wheels/
 
 # Deployment logs
 logs/
+
+# User configuration files
+config.yaml
