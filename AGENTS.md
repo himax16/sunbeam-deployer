@@ -18,7 +18,7 @@ Add new dependencies to `pyproject.toml` under `[project] dependencies`, then `u
 
 ## Testing & Verification
 
-No formal test suite. Verify changes manually with these checks.
+Testing is managed via [tox](https://tox.wiki/) with config in `tox.ini`. Two environments: `unit` (pytest) and `lint` (ruff check + format).
 
 **Always run after any change:**
 
@@ -43,13 +43,14 @@ This is expensive (requires a provisioned machine). Skip for doc-only or logging
 ## Code Style
 
 - **Python 3.14+**. Use `from __future__ import annotations` in every module.
+- **80-char line length**. Enforced by `ruff` (configured in `pyproject.toml`).
 - Type hints on all function signatures. Use `str | None`, not `Optional[str]`.
 - Use `dataclasses` for all structured data.
 - Never `print()`. Use `logging.getLogger("sunbeam_deployer.<module>")`.
-- Group imports: stdlib → third-party → local. Alphabetize within groups.
+- Imports sorted by `ruff` (isort rules): stdlib → third-party → local.
 - Define `PHASE = "phase-name"` at module level in each phase file.
 - Module-level docstring in every file. Function docstrings for public functions.
-- No trailing whitespace. No unused imports.
+- Run `uv run ruff check --fix && uv run ruff format` before committing.
 
 ## Architecture
 

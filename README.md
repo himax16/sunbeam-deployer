@@ -9,15 +9,18 @@ on Testflinger machines using LXD VMs and Terraform.
 # Install dependencies using uv
 uv sync
 ```
+
 ```bash
 # Copy and edit config
 cp config.example.yaml config.yaml
 nano config.yaml
 ```
+
 ```bash
 # Run full deployment
 uv run sunbeam-deployer -c config.yaml
 ```
+
 ```bash
 # Or with defaults (no config file needed)
 uv run sunbeam-deployer
@@ -101,38 +104,47 @@ General options:
 # Full deployment with defaults (local machine)
 uv run sunbeam-deployer
 ```
+
 ```bash
 # Submit a Testflinger job and deploy on it
 uv run sunbeam-deployer --testflinger
 ```
+
 ```bash
 # Submit using a custom job YAML
 uv run sunbeam-deployer --tf-job-file ~/testflinger-job.yaml
 ```
+
 ```bash
 # Attach to an already-provisioned Testflinger job
 uv run sunbeam-deployer --tf-job-id 97c62a00-2522-414b-b296-1fe77a6bbd99
 ```
+
 ```bash
 # Deploy on a machine you already have SSH access to
 uv run sunbeam-deployer --device-ip 10.241.2.45
 ```
+
 ```bash
 # Use a specific snap channel on a Testflinger machine
 uv run sunbeam-deployer --testflinger --snap-channel 2024.2/beta
 ```
+
 ```bash
 # Install from a local snap file
 uv run sunbeam-deployer --snap-file ~/openstack_2024.1_amd64.snap
 ```
+
 ```bash
 # Run only the cluster phase (infra already deployed)
 uv run sunbeam-deployer --phase cluster
 ```
+
 ```bash
 # Verbose output + custom terraform variables
 uv run sunbeam-deployer -v --tf-arg="-var-file=custom.tfvars"
 ```
+
 ```bash
 # Bootstrap with accept-defaults (no interactive prompts)
 uv run sunbeam-deployer --accept-defaults
@@ -179,6 +191,7 @@ You can re-run a specific phase if a previous run partially succeeded:
 # Re-run only VM deployment (after host-setup already succeeded)
 uv run sunbeam-deployer -c config.yaml --phase vm-deploy
 ```
+
 ```bash
 # Re-run only cluster bootstrap/join
 uv run sunbeam-deployer -c config.yaml --phase cluster
@@ -186,6 +199,43 @@ uv run sunbeam-deployer -c config.yaml --phase cluster
 
 When running `vm-deploy` or `cluster` standalone, the deployer reconstructs
 VM metadata from existing Terraform outputs.
+
+## Development
+
+Development dependencies (pytest, ruff, tox) are **dev-only** — they are not
+installed for production use. Install them with:
+
+```bash
+uv sync                              # Installs runtime + dev deps
+```
+
+### Running Checks with tox
+
+[tox](https://tox.wiki/) is used to run all checks in isolated environments.
+Configuration lives in [`tox.ini`](tox.ini).
+
+| Command | Description |
+|---------|-------------|
+| `uv run tox` | Run **all** environments (unit + lint) |
+| `uv run tox -e unit` | Run unit tests only |
+| `uv run tox -e lint` | Run ruff linter + formatter check only |
+| `uv run tox -e unit -- -k "TestDeepMerge"` | Run specific tests |
+| `uv run tox -e unit -- tests/test_config.py` | Run a single test file |
+
+#### tox Environments
+
+- **`unit`** — Runs `pytest tests/ -v`. Supports `{posargs}` for passing
+  extra arguments (e.g. `-k`, `--tb=short`, specific files).
+- **`lint`** — Runs `ruff check` and `ruff format --check` against
+  `sunbeam_deployer/` and `tests/`. Enforces 80-char line length, import
+  sorting, and standard Python linting rules (E/F/W/I/UP/B/SIM).
+
+#### Fixing Lint Issues
+
+```bash
+uv run ruff check --fix sunbeam_deployer/ tests/   # Auto-fix lint errors
+uv run ruff format sunbeam_deployer/ tests/         # Auto-format code
+```
 
 ## Project Structure
 
