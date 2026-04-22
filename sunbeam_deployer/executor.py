@@ -11,11 +11,11 @@ routed through SSH so that existing phase code works unchanged.
 from __future__ import annotations
 
 import logging
-import subprocess
 import shlex
+import subprocess
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 log = logging.getLogger("sunbeam_deployer.executor")
 
@@ -24,9 +24,11 @@ log = logging.getLogger("sunbeam_deployer.executor")
 # Remote target (SSH) — module-level state
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class RemoteTarget:
     """SSH connection details for a remote machine."""
+
     host: str
     user: str = "ubuntu"
     key_path: str | None = None
@@ -35,7 +37,13 @@ class RemoteTarget:
     @property
     def ssh_base(self) -> list[str]:
         """Base SSH command components."""
-        cmd = ["ssh", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null"]
+        cmd = [
+            "ssh",
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "UserKnownHostsFile=/dev/null",
+        ]
         if self.key_path:
             cmd.extend(["-i", self.key_path])
         if self.ssh_options:
@@ -46,7 +54,13 @@ class RemoteTarget:
     @property
     def scp_base(self) -> list[str]:
         """Base SCP command components."""
-        cmd = ["scp", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null"]
+        cmd = [
+            "scp",
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "UserKnownHostsFile=/dev/null",
+        ]
         if self.key_path:
             cmd.extend(["-i", self.key_path])
         return cmd
@@ -99,9 +113,16 @@ def run_local(
 
     Used for testflinger CLI calls and other local-only operations.
     """
-    return _run_subprocess(cmd, timeout=timeout, cwd=cwd, env=env,
-                           stream=stream, check=check, input_text=input_text,
-                           log_prefix="local")
+    return _run_subprocess(
+        cmd,
+        timeout=timeout,
+        cwd=cwd,
+        env=env,
+        stream=stream,
+        check=check,
+        input_text=input_text,
+        log_prefix="local",
+    )
 
 
 def run_host(
@@ -121,12 +142,24 @@ def run_host(
     If *check* is ``True`` a non-zero exit raises ``RuntimeError``.
     """
     if _remote_target is not None:
-        return _run_via_ssh(cmd, timeout=timeout, stream=stream, check=check,
-                            input_text=input_text)
+        return _run_via_ssh(
+            cmd,
+            timeout=timeout,
+            stream=stream,
+            check=check,
+            input_text=input_text,
+        )
 
-    return _run_subprocess(cmd, timeout=timeout, cwd=cwd, env=env,
-                           stream=stream, check=check, input_text=input_text,
-                           log_prefix="host")
+    return _run_subprocess(
+        cmd,
+        timeout=timeout,
+        cwd=cwd,
+        env=env,
+        stream=stream,
+        check=check,
+        input_text=input_text,
+        log_prefix="host",
+    )
 
 
 def _run_via_ssh(
@@ -147,8 +180,14 @@ def _run_via_ssh(
 
     ssh_cmd = _remote_target.ssh_base + [remote_cmd]
     log.debug("ssh[%s]$ %s", _remote_target.host, remote_cmd)
-    return _run_subprocess(ssh_cmd, timeout=timeout, stream=stream, check=check,
-                           input_text=input_text, log_prefix=f"ssh[{_remote_target.host}]")
+    return _run_subprocess(
+        ssh_cmd,
+        timeout=timeout,
+        stream=stream,
+        check=check,
+        input_text=input_text,
+        log_prefix=f"ssh[{_remote_target.host}]",
+    )
 
 
 def _run_subprocess(
@@ -191,6 +230,7 @@ def _run_subprocess(
         if input_text:
             proc.stdin.write(input_text)
             proc.stdin.close()
+            proc.stdin = None  # prevent communicate() from re-closing
 
         if stream and proc.stdout:
             for line in proc.stdout:
@@ -229,7 +269,8 @@ def _run_subprocess(
         )
     if check and not result.ok:
         raise RuntimeError(
-            f"Command failed (rc={result.returncode}): {display_cmd}\n{result.stdout[-2000:]}"
+            f"Command failed (rc={result.returncode}): "
+            f"{display_cmd}\n{result.stdout[-2000:]}"
         )
 
     return result
@@ -273,7 +314,8 @@ def push_file_to_vm(
             return scp_result
         # Then push from remote host into the VM
         return run_host(
-            f"lxc file push /tmp/_deployer_push_{vm_name} {vm_name}{remote_path}"
+            f"lxc file push /tmp/_deployer_push_{vm_name}"
+            f" {vm_name}{remote_path}"
             f" && rm -f /tmp/_deployer_push_{vm_name}",
             check=check,
         )
@@ -284,7 +326,9 @@ def push_file_to_vm(
     )
 
 
-def scp_to_remote(local_path: str, remote_path: str, *, check: bool = True) -> CommandResult:
+def scp_to_remote(
+    local_path: str, remote_path: str, *, check: bool = True
+) -> CommandResult:
     """Copy a local file to the remote SSH target."""
     assert _remote_target is not None
     cmd = _remote_target.scp_base + [
@@ -294,22 +338,31 @@ def scp_to_remote(local_path: str, remote_path: str, *, check: bool = True) -> C
     return _run_subprocess(cmd, check=check, log_prefix="scp")
 
 
-def wait_for_ssh(host: str, user: str, key_path: str | None = None, timeout: int = 600) -> bool:
+def wait_for_ssh(
+    host: str, user: str, key_path: str | None = None, timeout: int = 600
+) -> bool:
     """Wait until an SSH connection to *host* succeeds."""
     log.info("Waiting for SSH on %s@%s…", user, host)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         ssh_cmd = [
-            "ssh", "-o", "StrictHostKeyChecking=no",
-            "-o", "UserKnownHostsFile=/dev/null",
-            "-o", "ConnectTimeout=10",
-            "-o", "BatchMode=yes",
+            "ssh",
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "UserKnownHostsFile=/dev/null",
+            "-o",
+            "ConnectTimeout=10",
+            "-o",
+            "BatchMode=yes",
         ]
         if key_path:
             ssh_cmd.extend(["-i", key_path])
         ssh_cmd.extend([f"{user}@{host}", "echo ready"])
 
-        result = _run_subprocess(ssh_cmd, timeout=15, stream=False, log_prefix="ssh-probe")
+        result = _run_subprocess(
+            ssh_cmd, timeout=15, stream=False, log_prefix="ssh-probe"
+        )
         if result.ok and "ready" in result.stdout:
             log.info("SSH ready on %s", host)
             return True

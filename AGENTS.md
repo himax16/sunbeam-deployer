@@ -26,6 +26,10 @@ No formal test suite. Verify changes manually with these checks.
 uv run python -c "from sunbeam_deployer import __version__; print(__version__)"   # Import check
 uv run sunbeam-deployer --help                                                     # CLI loads
 uv run python -c "from sunbeam_deployer.config import load_config; load_config()"  # Config parses
+uv run tox                                                                         # All checks (unit + lint)
+uv run tox -e unit                                                                 # Unit tests only
+uv run tox -e lint                                                                 # Compile checks only
+uv run tox -e unit -- -k "TestDeepMerge"                                           # Run specific tests
 ```
 
 **Run when touching executor, phases, or config schema:**

@@ -1,4 +1,4 @@
-"""Phase 1 — Host setup: LXD, Terraform, clone repo, bootstrap infrastructure."""
+"""Phase 1 — Host setup: LXD, Terraform, bootstrap."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass, field
 
 from sunbeam_deployer.config import DeployConfig
-from sunbeam_deployer.executor import run_host, with_retry
+from sunbeam_deployer.executor import run_host
 from sunbeam_deployer.monitor import DeploymentMonitor, Status
 
 log = logging.getLogger("sunbeam_deployer.phases.host_setup")
@@ -59,6 +59,7 @@ def run_phase(cfg: DeployConfig, mon: DeploymentMonitor) -> InfraInfo:
 # ---------------------------------------------------------------------------
 # Steps
 # ---------------------------------------------------------------------------
+
 
 def _install_lxd(cfg: DeployConfig, mon: DeploymentMonitor) -> None:
     with mon.run_step(PHASE, "install-lxd", "Install and initialise LXD"):
@@ -117,7 +118,9 @@ def _clone_repo(cfg: DeployConfig, mon: DeploymentMonitor) -> None:
 
 
 def _run_bootstrap(cfg: DeployConfig, mon: DeploymentMonitor) -> None:
-    with mon.run_step(PHASE, "bootstrap", "Run infrastructure bootstrap (Terraform)"):
+    with mon.run_step(
+        PHASE, "bootstrap", "Run infrastructure bootstrap (Terraform)"
+    ):
         repo_dir = cfg.repo_dir
         bootstrap_script = f"{repo_dir}/bootstrap.sh"
 
@@ -132,7 +135,9 @@ def _run_bootstrap(cfg: DeployConfig, mon: DeploymentMonitor) -> None:
         run_host(cmd, check=True, timeout=cfg.timeouts.terraform_apply)
 
 
-def _parse_terraform_outputs(cfg: DeployConfig, mon: DeploymentMonitor) -> InfraInfo:
+def _parse_terraform_outputs(
+    cfg: DeployConfig, mon: DeploymentMonitor
+) -> InfraInfo:
     with mon.run_step(PHASE, "parse-outputs", "Parse Terraform outputs"):
         repo_dir = cfg.repo_dir
         plan_dir = f"{repo_dir}/manual-infra"

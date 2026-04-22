@@ -9,11 +9,12 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-
 # Patterns that should be redacted in log output
 _SENSITIVE_PATTERNS = [
     re.compile(r"(token[\"']?\s*[:=]\s*[\"']?)([A-Za-z0-9+/=_-]{16,})", re.I),
-    re.compile(r"(-----BEGIN [A-Z ]+KEY-----)(.*?)(-----END [A-Z ]+KEY-----)", re.S),
+    re.compile(
+        r"(-----BEGIN [A-Z ]+KEY-----)(.*?)(-----END [A-Z ]+KEY-----)", re.S
+    ),
     re.compile(r"(apikey[\"']?\s*[:=]\s*[\"']?)(\S+)", re.I),
     re.compile(r"(password[\"']?\s*[:=]\s*[\"']?)(\S+)", re.I),
 ]
@@ -41,10 +42,10 @@ class _TerminalFormatter(_RedactingFormatter):
     """Coloured, concise terminal output."""
 
     COLORS = {
-        logging.DEBUG: "\033[90m",     # grey
-        logging.INFO: "\033[36m",      # cyan
-        logging.WARNING: "\033[33m",   # yellow
-        logging.ERROR: "\033[31m",     # red
+        logging.DEBUG: "\033[90m",  # grey
+        logging.INFO: "\033[36m",  # cyan
+        logging.WARNING: "\033[33m",  # yellow
+        logging.ERROR: "\033[31m",  # red
         logging.CRITICAL: "\033[1;31m",  # bold red
     }
     RESET = "\033[0m"
@@ -58,7 +59,10 @@ class _TerminalFormatter(_RedactingFormatter):
         prefix = f"[{'/'.join(prefix_parts)}] " if prefix_parts else ""
         ts = datetime.fromtimestamp(record.created).strftime("%H:%M:%S")
         msg = _redact(record.getMessage())
-        return f"{colour}{ts} {self.BOLD}{prefix}{self.RESET}{colour}{msg}{self.RESET}"
+        return (
+            f"{colour}{ts} {self.BOLD}{prefix}"
+            f"{self.RESET}{colour}{msg}{self.RESET}"
+        )
 
 
 def setup_logging(log_dir: str, verbose: bool = False) -> logging.Logger:
@@ -79,7 +83,9 @@ def setup_logging(log_dir: str, verbose: bool = False) -> logging.Logger:
     fh = logging.FileHandler(str(log_file), encoding="utf-8")
     fh.setLevel(logging.DEBUG)
     fh.setFormatter(
-        _RedactingFormatter("%(asctime)s %(levelname)-8s [%(name)s] %(message)s")
+        _RedactingFormatter(
+            "%(asctime)s %(levelname)-8s [%(name)s] %(message)s"
+        )
     )
     logger.addHandler(fh)
 

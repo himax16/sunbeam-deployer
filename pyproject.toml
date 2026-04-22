@@ -17,3 +17,22 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["sunbeam_deployer"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0",
+    "ruff>=0.15",
+    "tox>=4.0",
+    "tox-uv>=1.0",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 80
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = ["SIM108"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["sunbeam_deployer"]

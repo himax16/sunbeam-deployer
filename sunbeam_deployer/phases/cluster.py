@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 
@@ -27,7 +26,9 @@ def run_phase(
 
     try:
         if not infra.nodes:
-            raise RuntimeError("No compute nodes found — cannot bootstrap cluster")
+            raise RuntimeError(
+                "No compute nodes found — cannot bootstrap cluster"
+            )
 
         primary = infra.nodes[0]
         secondaries = infra.nodes[1:]
@@ -53,13 +54,16 @@ def run_phase(
 # Steps
 # ---------------------------------------------------------------------------
 
+
 def _validate_dns(
     cfg: DeployConfig,
     mon: DeploymentMonitor,
     infra: InfraInfo,
 ) -> None:
     """Check that each node can resolve every other node's FQDN."""
-    with mon.run_step(PHASE, "dns-validation", "Validate cross-node DNS resolution"):
+    with mon.run_step(
+        PHASE, "dns-validation", "Validate cross-node DNS resolution"
+    ):
         all_ok = True
         for src in infra.nodes:
             for dst in infra.nodes:
@@ -88,7 +92,8 @@ def _validate_dns(
 
         if not all_ok:
             raise RuntimeError(
-                "DNS validation failed — nodes cannot resolve each other's FQDNs. "
+                "DNS validation failed — nodes cannot "
+                "resolve each other's FQDNs. "
                 "Check the DNS/dnsmasq configuration."
             )
         log.info("All nodes can resolve each other's FQDNs")
@@ -126,7 +131,9 @@ def _bootstrap(
 
         if not result.ok:
             raise RuntimeError(
-                f"Cluster bootstrap failed on {node.hostname}:\n{result.stdout[-2000:]}"
+                f"Cluster bootstrap failed on "
+                f"{node.hostname}:\n"
+                f"{result.stdout[-2000:]}"
             )
 
         log.info("Cluster bootstrap completed on %s", node.hostname)
@@ -144,7 +151,9 @@ def _join_node(
 
     with mon.run_step(PHASE, step_name, desc):
         # Step 1: Generate join token on the primary node
-        log.info("Generating join token for %s on %s", node.fqdn, primary.hostname)
+        log.info(
+            "Generating join token for %s on %s", node.fqdn, primary.hostname
+        )
         token_result = run_in_vm(
             primary.name,
             f"sunbeam cluster add --format yaml {node.fqdn}",
@@ -153,13 +162,16 @@ def _join_node(
 
         if not token_result.ok:
             raise RuntimeError(
-                f"Failed to generate join token for {node.fqdn}:\n{token_result.stdout[-1000:]}"
+                f"Failed to generate join token for "
+                f"{node.fqdn}:\n"
+                f"{token_result.stdout[-1000:]}"
             )
 
         token = _extract_token(token_result.stdout)
         if not token:
             raise RuntimeError(
-                f"Could not extract join token from output:\n{token_result.stdout[-1000:]}"
+                "Could not extract join token from "
+                f"output:\n{token_result.stdout[-1000:]}"
             )
 
         log.debug("Join token obtained for %s", node.fqdn)
@@ -177,7 +189,9 @@ def _join_node(
 
         if not join_result.ok:
             raise RuntimeError(
-                f"Cluster join failed on {node.hostname}:\n{join_result.stdout[-2000:]}"
+                f"Cluster join failed on "
+                f"{node.hostname}:\n"
+                f"{join_result.stdout[-2000:]}"
             )
 
         log.info("Node %s joined the cluster", node.hostname)
@@ -193,14 +207,14 @@ def _extract_token(output: str) -> str | None:
     for line in output.splitlines():
         stripped = line.strip()
         if stripped.startswith("token:"):
-            value = stripped[len("token:"):].strip().strip("'\"")
+            value = stripped[len("token:") :].strip().strip("'\"")
             if value:
                 return value
 
     # Fallback: look for a long base64-like token on its own line
     for line in reversed(output.splitlines()):
         stripped = line.strip()
-        if re.match(r'^[A-Za-z0-9+/=_.-]{20,}$', stripped):
+        if re.match(r"^[A-Za-z0-9+/=_.-]{20,}$", stripped):
             return stripped
 
     return None

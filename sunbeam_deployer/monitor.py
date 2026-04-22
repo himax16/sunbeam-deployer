@@ -105,16 +105,22 @@ class DeploymentMonitor:
         log.info("━━━ Phase: %s ━━━", name)
         return phase
 
-    def end_phase(self, name: str, status: Status, error: str | None = None) -> None:
+    def end_phase(
+        self, name: str, status: Status, error: str | None = None
+    ) -> None:
         phase = self._phase_map[name]
         phase.status = status
         phase.end_time = time.monotonic()
         sym = status.symbol
-        log.info("%s Phase '%s' %s (%s)", sym, name, status.value, phase.duration_str)
+        log.info(
+            "%s Phase '%s' %s (%s)", sym, name, status.value, phase.duration_str
+        )
 
     # -- Step lifecycle --------------------------------------------------------
 
-    def add_step(self, phase_name: str, step_name: str, description: str = "") -> Step:
+    def add_step(
+        self, phase_name: str, step_name: str, description: str = ""
+    ) -> Step:
         step = Step(name=step_name, description=description)
         self._phase_map[phase_name].steps.append(step)
         return step
@@ -138,12 +144,19 @@ class DeploymentMonitor:
         step.end_time = time.monotonic()
         step.error = error
         if status == Status.FAILED:
-            log.error("  %s %s — FAILED (%s)", status.symbol, step_name, step.duration_str)
+            log.error(
+                "  %s %s — FAILED (%s)",
+                status.symbol,
+                step_name,
+                step.duration_str,
+            )
             if error:
                 for line in error.splitlines()[:5]:
                     log.error("    %s", line)
         else:
-            log.debug("  %s %s (%s)", status.symbol, step_name, step.duration_str)
+            log.debug(
+                "  %s %s (%s)", status.symbol, step_name, step.duration_str
+            )
 
     def run_step(
         self,
@@ -160,7 +173,11 @@ class DeploymentMonitor:
         total = time.monotonic() - self._overall_start
         mins, secs = divmod(int(total), 60)
         hours, mins = divmod(mins, 60)
-        time_str = f"{hours}h{mins:02d}m{secs:02d}s" if hours else f"{mins}m{secs:02d}s"
+        time_str = (
+            f"{hours}h{mins:02d}m{secs:02d}s"
+            if hours
+            else f"{mins}m{secs:02d}s"
+        )
 
         lines = [
             "",
@@ -172,18 +189,26 @@ class DeploymentMonitor:
         ]
 
         for phase in self.phases:
-            lines.append(f"  {phase.status.symbol} {phase.name} ({phase.duration_str})")
+            lines.append(
+                f"  {phase.status.symbol} {phase.name} ({phase.duration_str})"
+            )
             for step in phase.steps:
+                desc = step.description or step.name
                 lines.append(
-                    f"      {step.status.symbol} {step.description or step.name} ({step.duration_str})"
+                    f"      {step.status.symbol} {desc} ({step.duration_str})"
                 )
                 if step.error:
                     for err_line in step.error.splitlines()[:3]:
                         lines.append(f"          ⚠ {err_line}")
 
-        overall = Status.SUCCESS if all(
-            p.status in (Status.SUCCESS, Status.SKIPPED) for p in self.phases
-        ) else Status.FAILED
+        overall = (
+            Status.SUCCESS
+            if all(
+                p.status in (Status.SUCCESS, Status.SKIPPED)
+                for p in self.phases
+            )
+            else Status.FAILED
+        )
         lines.append("")
         lines.append(f"  Overall: {overall.symbol} {overall.value.upper()}")
         lines.append("")

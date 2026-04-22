@@ -23,12 +23,14 @@ def build_parser() -> argparse.ArgumentParser:
         "-V", "--version", action="version", version=f"%(prog)s {__version__}"
     )
     parser.add_argument(
-        "-c", "--config",
+        "-c",
+        "--config",
         metavar="FILE",
         help="Path to YAML configuration file (default: use built-in defaults)",
     )
     parser.add_argument(
-        "-v", "--verbose",
+        "-v",
+        "--verbose",
         action="store_true",
         help="Enable verbose (DEBUG) terminal output",
     )
@@ -38,11 +40,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--phase",
         choices=["all", "testflinger", "host-setup", "vm-deploy", "cluster"],
         default="all",
-        help="Run a specific phase instead of the full deployment (default: all)",
+        help=(
+            "Run a specific phase instead of the full deployment (default: all)"
+        ),
     )
 
     # Testflinger options
-    tf_group = parser.add_argument_group("testflinger", "Testflinger machine provisioning")
+    tf_group = parser.add_argument_group(
+        "testflinger", "Testflinger machine provisioning"
+    )
     tf_group.add_argument(
         "--testflinger",
         action="store_true",
@@ -119,7 +125,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--cancel-on-failure",
         action="store_true",
         default=False,
-        help="Cancel the Testflinger job if deployment fails (releases the machine)",
+        help=(
+            "Cancel the Testflinger job if "
+            "deployment fails (releases the machine)"
+        ),
     )
     return parser
 
@@ -170,9 +179,14 @@ def _prompt_cancel_job(logger: logging.Logger, job_id: str) -> None:
     """Interactively ask whether to cancel a Testflinger job we submitted."""
     logger.info("Testflinger job: %s", job_id)
     try:
-        answer = input(
-            f"\nCancel Testflinger job {job_id} and release the machine? [y/N] "
-        ).strip().lower()
+        answer = (
+            input(
+                f"\nCancel Testflinger job {job_id}"
+                " and release the machine? [y/N] "
+            )
+            .strip()
+            .lower()
+        )
     except (EOFError, KeyboardInterrupt):
         answer = ""
         print()
@@ -210,7 +224,9 @@ def main(argv: list[str] | None = None) -> int:
     logger = setup_logging(cfg.logging.log_dir, cfg.logging.verbose)
     logger.info("Sunbeam Deployer v%s", __version__)
     logger.info("Deploy mode: %s", cfg.deploy_mode)
-    logger.info("Snap source: %s (channel=%s)", cfg.snap.source, cfg.snap.channel)
+    logger.info(
+        "Snap source: %s (channel=%s)", cfg.snap.source, cfg.snap.channel
+    )
 
     # Set up monitor
     mon = DeploymentMonitor()
@@ -231,6 +247,7 @@ def main(argv: list[str] | None = None) -> int:
         elif direct_ip:
             # --device-ip: skip testflinger, set up SSH directly
             from sunbeam_deployer.executor import wait_for_ssh
+
             logger.info("Connecting directly to %s", direct_ip)
             ssh_user = cfg.testflinger.ssh_user
             ssh_key = cfg.testflinger.ssh_key_path
@@ -241,17 +258,25 @@ def main(argv: list[str] | None = None) -> int:
                 RemoteTarget(host=direct_ip, user=ssh_user, key_path=ssh_key)
             )
         elif phase == "testflinger":
-            logger.error("Testflinger is not enabled — use --testflinger or config")
+            logger.error(
+                "Testflinger is not enabled — use --testflinger or config"
+            )
             return 1
 
         # Phase 1: Host setup
         if phase in ("all", "host-setup"):
             infra = host_setup.run_phase(cfg, mon)
 
-        # For single-phase runs after host-setup, reconstruct infra from terraform
+        # For single-phase runs, reconstruct infra from terraform
         if infra is None and phase in ("vm-deploy", "cluster"):
-            logger.info("Reconstructing infrastructure info from Terraform outputs…")
-            from sunbeam_deployer.phases.host_setup import _parse_terraform_outputs, PHASE as HS_PHASE
+            logger.info(
+                "Reconstructing infrastructure info from Terraform outputs…"
+            )
+            from sunbeam_deployer.phases.host_setup import PHASE as HS_PHASE
+            from sunbeam_deployer.phases.host_setup import (
+                _parse_terraform_outputs,
+            )
+
             tmp_mon = DeploymentMonitor()
             tmp_mon.add_phase(HS_PHASE)
             tmp_mon.start_phase(HS_PHASE)

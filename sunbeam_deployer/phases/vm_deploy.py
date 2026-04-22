@@ -85,16 +85,25 @@ def _deploy_single_vm(
 # Steps
 # ---------------------------------------------------------------------------
 
-def _wait_ready(cfg: DeployConfig, mon: DeploymentMonitor, vm: str, label: str) -> None:
-    with mon.run_step(PHASE, f"{label}/wait-ready", f"Wait for {label} to be ready"):
+
+def _wait_ready(
+    cfg: DeployConfig, mon: DeploymentMonitor, vm: str, label: str
+) -> None:
+    with mon.run_step(
+        PHASE, f"{label}/wait-ready", f"Wait for {label} to be ready"
+    ):
         if not wait_for_vm(vm, timeout=120):
             raise RuntimeError(f"VM {vm} not responsive")
         if not wait_for_cloud_init(vm, timeout=cfg.timeouts.cloud_init_wait):
             raise RuntimeError(f"cloud-init failed on {vm}")
 
 
-def _install_snap(cfg: DeployConfig, mon: DeploymentMonitor, vm: str, label: str) -> None:
-    with mon.run_step(PHASE, f"{label}/install-snap", f"Install openstack snap on {label}"):
+def _install_snap(
+    cfg: DeployConfig, mon: DeploymentMonitor, vm: str, label: str
+) -> None:
+    with mon.run_step(
+        PHASE, f"{label}/install-snap", f"Install openstack snap on {label}"
+    ):
         if cfg.snap.source == "store":
             _install_from_store(cfg, vm)
         else:
@@ -120,7 +129,9 @@ def _install_from_store(cfg: DeployConfig, vm: str) -> None:
         label=f"snap install on {vm}",
     )
     if not result.ok:
-        raise RuntimeError(f"Failed to install openstack snap on {vm}: {result.stdout[-500:]}")
+        raise RuntimeError(
+            f"Failed to install openstack snap on {vm}: {result.stdout[-500:]}"
+        )
 
 
 def _install_from_local(cfg: DeployConfig, vm: str) -> None:
@@ -131,7 +142,9 @@ def _install_from_local(cfg: DeployConfig, vm: str) -> None:
     # Push file to VM
     push_result = push_file_to_vm(vm, local_path, remote_path)
     if not push_result.ok:
-        raise RuntimeError(f"Failed to push snap to {vm}: {push_result.stdout[-500:]}")
+        raise RuntimeError(
+            f"Failed to push snap to {vm}: {push_result.stdout[-500:]}"
+        )
 
     if cfg.snap.install_method == "try":
         # Unsquash and snap try
@@ -147,14 +160,27 @@ def _install_from_local(cfg: DeployConfig, vm: str) -> None:
         )
 
 
-def _setup_alias(cfg: DeployConfig, mon: DeploymentMonitor, vm: str, label: str) -> None:
-    with mon.run_step(PHASE, f"{label}/alias", f"Set up sunbeam alias on {label}"):
-        run_in_vm(vm, "sudo snap alias openstack.sunbeam sunbeam", check=True, timeout=30)
+def _setup_alias(
+    cfg: DeployConfig, mon: DeploymentMonitor, vm: str, label: str
+) -> None:
+    with mon.run_step(
+        PHASE, f"{label}/alias", f"Set up sunbeam alias on {label}"
+    ):
+        run_in_vm(
+            vm,
+            "sudo snap alias openstack.sunbeam sunbeam",
+            check=True,
+            timeout=30,
+        )
 
 
-def _connect_interfaces(cfg: DeployConfig, mon: DeploymentMonitor, vm: str, label: str) -> None:
+def _connect_interfaces(
+    cfg: DeployConfig, mon: DeploymentMonitor, vm: str, label: str
+) -> None:
     """Connect snap interfaces required when installing from local build."""
-    with mon.run_step(PHASE, f"{label}/interfaces", f"Connect snap interfaces on {label}"):
+    with mon.run_step(
+        PHASE, f"{label}/interfaces", f"Connect snap interfaces on {label}"
+    ):
         interfaces = [
             "openstack:juju-bin juju:juju-bin",
             "openstack:dot-local-share-juju",
@@ -166,11 +192,17 @@ def _connect_interfaces(cfg: DeployConfig, mon: DeploymentMonitor, vm: str, labe
                 vm, f"sudo snap connect {iface}", timeout=30, stream=False
             )
             if not result.ok:
-                log.warning("Interface connect may have failed on %s: %s", vm, iface)
+                log.warning(
+                    "Interface connect may have failed on %s: %s", vm, iface
+                )
 
 
-def _prepare_node(cfg: DeployConfig, mon: DeploymentMonitor, vm: str, label: str) -> None:
-    with mon.run_step(PHASE, f"{label}/prepare", f"Prepare node for Sunbeam on {label}"):
+def _prepare_node(
+    cfg: DeployConfig, mon: DeploymentMonitor, vm: str, label: str
+) -> None:
+    with mon.run_step(
+        PHASE, f"{label}/prepare", f"Prepare node for Sunbeam on {label}"
+    ):
         # Run prepare-node-script; skip newgrp (handled by fresh login shell)
         result = run_in_vm(
             vm,
@@ -198,13 +230,18 @@ def _push_manifest(
         # so check existence and push via run_host, not local filesystem.
         check = run_host(f"test -f {infra.manifest_path}", stream=False)
         if not check.ok:
-            log.warning("Manifest file not found at %s — skipping", infra.manifest_path)
+            log.warning(
+                "Manifest file not found at %s — skipping", infra.manifest_path
+            )
             return
 
         result = run_host(
-            f"lxc file push {infra.manifest_path} {vm}/home/ubuntu/manifest.yaml",
+            f"lxc file push {infra.manifest_path}"
+            f" {vm}/home/ubuntu/manifest.yaml",
             check=False,
             stream=True,
         )
         if not result.ok:
-            raise RuntimeError(f"Failed to push manifest to {vm}: {result.stdout[-500:]}")
+            raise RuntimeError(
+                f"Failed to push manifest to {vm}: {result.stdout[-500:]}"
+            )

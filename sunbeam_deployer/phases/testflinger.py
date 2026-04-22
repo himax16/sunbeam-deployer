@@ -33,7 +33,14 @@ PHASE = "testflinger"
 # Testflinger job phases run in this order:
 #   setup → provision → firmware_update → test → allocate → reserve → cleanup
 # We consider the job "ready" once it reaches the reserve phase.
-_WAITING_PHASES = {"waiting", "queued", "setup", "provision", "firmware_update", "allocate"}
+_WAITING_PHASES = {
+    "waiting",
+    "queued",
+    "setup",
+    "provision",
+    "firmware_update",
+    "allocate",
+}
 _READY_PHASES = {"reserve", "test"}
 _TERMINAL_PHASES = {"cancelled", "complete", "completed", "cleanup"}
 
@@ -71,7 +78,7 @@ def run_phase(cfg: DeployConfig, mon: DeploymentMonitor) -> str:
 
 
 def cancel_job(job_id: str) -> None:
-    """Cancel a Testflinger job (e.g. on deployment failure to release the machine)."""
+    """Cancel a Testflinger job to release the machine."""
     log.info("Cancelling Testflinger job %s", job_id)
     result = run_local(
         ["testflinger", "cancel", job_id],
@@ -103,15 +110,17 @@ def get_job_results(job_id: str) -> dict:
     )
     try:
         return json.loads(result.stdout)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as err:
         raise RuntimeError(
-            f"Could not parse testflinger results as JSON: {result.stdout[:500]}"
-        )
+            "Could not parse testflinger results "
+            f"as JSON: {result.stdout[:500]}"
+        ) from err
 
 
 # ---------------------------------------------------------------------------
 # Steps
 # ---------------------------------------------------------------------------
+
 
 def _submit_job(cfg: DeployConfig, mon: DeploymentMonitor) -> str:
     """Submit a new Testflinger job and return the job ID."""
@@ -174,7 +183,9 @@ def _generate_job_yaml(cfg: DeployConfig) -> str:
     return path
 
 
-def _wait_for_ready(cfg: DeployConfig, mon: DeploymentMonitor, job_id: str) -> str:
+def _wait_for_ready(
+    cfg: DeployConfig, mon: DeploymentMonitor, job_id: str
+) -> str:
     """Poll the Testflinger job until it reaches 'reserve' and return device IP.
 
     Testflinger phases run sequentially:
@@ -199,8 +210,9 @@ def _wait_for_ready(cfg: DeployConfig, mon: DeploymentMonitor, job_id: str) -> s
 
             if state in _TERMINAL_PHASES:
                 raise RuntimeError(
-                    f"Testflinger job {job_id} reached terminal state '{state}' "
-                    f"before provisioning completed"
+                    f"Testflinger job {job_id} reached "
+                    f"terminal state '{state}' "
+                    "before provisioning completed"
                 )
 
             # Back off gradually: 15s for first 5 min, then 30s
@@ -233,14 +245,19 @@ def _get_device_ip(job_id: str) -> str:
     return device_ip
 
 
-def _setup_ssh(cfg: DeployConfig, mon: DeploymentMonitor, device_ip: str) -> None:
+def _setup_ssh(
+    cfg: DeployConfig, mon: DeploymentMonitor, device_ip: str
+) -> None:
     """Wait for SSH and configure the executor remote target."""
     with mon.run_step(PHASE, "ssh-connect", f"Establish SSH to {device_ip}"):
         tf = cfg.testflinger
 
-        if not wait_for_ssh(device_ip, tf.ssh_user, tf.ssh_key_path, timeout=300):
+        if not wait_for_ssh(
+            device_ip, tf.ssh_user, tf.ssh_key_path, timeout=300
+        ):
             raise RuntimeError(
-                f"Cannot SSH to {tf.ssh_user}@{device_ip} — machine not reachable"
+                f"Cannot SSH to {tf.ssh_user}@{device_ip}"
+                " — machine not reachable"
             )
 
         set_remote_target(

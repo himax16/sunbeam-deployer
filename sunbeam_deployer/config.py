@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import os
 import copy
-from dataclasses import dataclass, field
+import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
-
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -71,7 +70,11 @@ def _deep_merge(base: dict, override: dict) -> dict:
     """Recursively merge *override* into a copy of *base*."""
     result = copy.deepcopy(base)
     for key, value in override.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+        if (
+            key in result
+            and isinstance(result[key], dict)
+            and isinstance(value, dict)
+        ):
             result[key] = _deep_merge(result[key], value)
         else:
             result[key] = copy.deepcopy(value)
@@ -81,6 +84,7 @@ def _deep_merge(base: dict, override: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Dataclasses
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class SnapConfig:
@@ -93,15 +97,23 @@ class SnapConfig:
     def validate(self) -> list[str]:
         errors: list[str] = []
         if self.source not in ("store", "local"):
-            errors.append(f"snap.source must be 'store' or 'local', got '{self.source}'")
+            errors.append(
+                f"snap.source must be 'store' or 'local', got '{self.source}'"
+            )
         if self.source == "local":
             if not self.local_path:
-                errors.append("snap.local_path is required when snap.source='local'")
+                errors.append(
+                    "snap.local_path is required when snap.source='local'"
+                )
             elif not Path(os.path.expanduser(self.local_path)).exists():
-                errors.append(f"snap.local_path does not exist: {self.local_path}")
+                errors.append(
+                    f"snap.local_path does not exist: {self.local_path}"
+                )
         if self.install_method not in ("dangerous", "try"):
             errors.append(
-                f"snap.install_method must be 'dangerous' or 'try', got '{self.install_method}'"
+                "snap.install_method must be "
+                "'dangerous' or 'try', "
+                f"got '{self.install_method}'"
             )
         return errors
 
@@ -155,7 +167,8 @@ class TestflingerConfig:
             return errors
         if self.job_id and self.job_file:
             errors.append(
-                "testflinger: specify either job_id (attach) or job_file (submit), not both"
+                "testflinger: specify either job_id (attach)"
+                " or job_file (submit), not both"
             )
         if not self.job_id and not self.job_file and not self.ssh_keys:
             errors.append(
@@ -187,7 +200,8 @@ class DeployConfig:
         errors: list[str] = []
         if self.deploy_mode not in ("manual", "maas"):
             errors.append(
-                f"deploy_mode must be 'manual' or 'maas', got '{self.deploy_mode}'"
+                "deploy_mode must be 'manual' or 'maas',"
+                f" got '{self.deploy_mode}'"
             )
         if self.deploy_mode == "maas":
             errors.append("MAAS mode is not yet supported — use 'manual'")
@@ -199,6 +213,7 @@ class DeployConfig:
 # ---------------------------------------------------------------------------
 # Loading
 # ---------------------------------------------------------------------------
+
 
 def load_config(path: str | Path | None = None) -> DeployConfig:
     """Load configuration from a YAML file, merged with defaults.
