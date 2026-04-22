@@ -1,0 +1,106 @@
+# Sunbeam deployment configuration
+# See README.md for full documentation.
+
+# Infrastructure mode: "manual" (LXD-only) or "maas"
+deploy_mode: manual
+
+# Testflinger machine provisioning
+# Enable to automatically submit/attach to a Testflinger job and deploy
+# on the provisioned machine via SSH.
+testflinger:
+  enabled: false
+
+  # Attach to an existing job (skip submit). Mutually exclusive with job_file.
+  # job_id: 97c62a00-2522-414b-b296-1fe77a6bbd99
+
+  # Path to a Testflinger job YAML to submit. If omitted, one is generated
+  # from queue/distro/reserve_timeout/ssh_keys below.
+  # job_file: ~/testflinger-job.yaml
+
+  # Settings for auto-generated job YAML (ignored when job_file is set)
+  queue: openstack
+  distro: noble
+  reserve_timeout: 259200  # 3 days
+  ssh_keys:
+    - lp:himax16
+    - gh:himax16
+
+  # SSH connection to the provisioned machine
+  ssh_user: ubuntu
+  # ssh_key_path: ~/.ssh/id_rsa   # Private key for SSH (if not using agent)
+  provision_timeout: 1800  # Max wait for provisioning (seconds)
+
+# Git repository for the Terraform plans
+repo_url: https://github.com/himax16/sunbeam-proxified-dev.git
+repo_branch: main
+repo_dir: ~/sunbeam-proxified-dev
+
+# OpenStack snap installation
+snap:
+  # "store" — install from the snap store
+  # "local" — install from a local .snap file
+  source: store
+
+  # Snap store settings (used when source=store)
+  channel: 2024.1/edge
+  # revision: null       # Uncomment to pin a specific snap revision
+
+  # Local file settings (used when source=local)
+  # local_path: ~/openstack_2024.1_amd64.snap
+  # install_method: dangerous   # "dangerous" (snap install) or "try" (snap try)
+
+# Sunbeam cluster settings
+sunbeam:
+  # Default roles for nodes not listed in node_roles and not specified
+  # in Terraform outputs.
+  roles:
+    - control
+    - compute
+    - storage
+
+  # Per-node role overrides (takes priority over Terraform and default roles).
+  # Keys are VM names as created by Terraform (e.g. bm0, bm1, bm2).
+  # Valid roles: control, compute, storage, network
+  # node_roles:
+  #   bm0:
+  #     - control
+  #     - compute
+  #     - storage
+  #   bm1:
+  #     - compute
+  #     - storage
+  #   bm2:
+  #     - compute
+
+  # Push the Terraform-generated manifest.yaml to all VMs
+  manifest: true
+
+  # Use --accept-defaults for the bootstrap command (no interactive prompts)
+  accept_defaults: false
+
+  # Extra arguments appended to the bootstrap command
+  # bootstrap_extra_args: []
+
+# Terraform settings
+terraform:
+  # Extra arguments passed to bootstrap.sh / terraform apply
+  # Example: ["-var-file", "custom.tfvars"]
+  extra_args: []
+
+# Logging
+logging:
+  log_dir: ./logs
+  verbose: false
+
+# Timeouts (seconds) for each operation
+timeouts:
+  cloud_init_wait: 600     # Wait for cloud-init inside VMs
+  snap_install: 600        # Snap install timeout
+  prepare_node: 600        # sunbeam prepare-node-script timeout
+  cluster_bootstrap: 7200  # Cluster bootstrap (can take 30-60+ min)
+  cluster_join: 3600       # Cluster join per node
+  terraform_apply: 3600    # Terraform apply timeout
+
+# Concurrency control
+concurrency:
+  vm_deploy: 2  # Max VMs to deploy in parallel (keep low to avoid overload)
