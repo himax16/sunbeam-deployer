@@ -251,23 +251,36 @@ def _wait_for_ready(
         )
 
 
-def _get_device_ip(job_id: str) -> str:
+def _get_device_ip(job_id: str, retries: int = 10, delay: float = 5.0) -> str:
     """Extract the device IP from testflinger results.
 
     The results JSON contains ``device_info.device_ip`` once provisioning
-    is complete and the machine is in reserve/test phase.
+    is complete and the machine is in reserve/test phase.  Testflinger may
+    populate this field a few seconds after the job reaches 'reserve', so
+    we retry briefly to handle that race condition.
     """
-    results = get_job_results(job_id)
+    for attempt in range(retries):
+        results = get_job_results(job_id)
+        device_ip = results.get("device_info", {}).get("device_ip")
+        if device_ip:
+            agent_name = results.get("device_info", {}).get(
+                "agent_name", "unknown"
+            )
+            log.info("Device IP: %s (agent: %s)", device_ip, agent_name)
+            return device_ip
 
-    device_ip = results.get("device_info", {}).get("device_ip")
-    if not device_ip:
-        raise RuntimeError(
-            f"No device_ip in testflinger results for job {job_id}"
-        )
+        if attempt < retries - 1:
+            log.debug(
+                "device_ip not yet in results for job %s, "
+                "retrying in %.0fs (%d/%d)",
+                job_id[:8],
+                delay,
+                attempt + 1,
+                retries,
+            )
+            time.sleep(delay)
 
-    agent_name = results.get("device_info", {}).get("agent_name", "unknown")
-    log.info("Device IP: %s (agent: %s)", device_ip, agent_name)
-    return device_ip
+    raise RuntimeError(f"No device_ip in testflinger results for job {job_id}")
 
 
 def _setup_ssh(
