@@ -28,7 +28,7 @@ testflinger:
   # SSH connection to the provisioned machine
   ssh_user: ubuntu
   # ssh_key_path: ~/.ssh/id_rsa   # Private key for SSH (if not using agent)
-  provision_timeout: 1800  # Max wait for provisioning (seconds)
+  provision_timeout: 3600  # Max wait for provisioning (seconds)
 
 # Git repository for the Terraform plans
 repo_url: https://github.com/himax16/sunbeam-proxified-dev.git
@@ -46,8 +46,8 @@ snap:
   # revision: null       # Uncomment to pin a specific snap revision
 
   # Local file settings (used when source=local)
-  # local_path: ~/openstack_2024.1_amd64.snap
-  # install_method: dangerous   # "dangerous" (snap install) or "try" (snap try)
+  # local_path: ../snap-openstack/openstack_2024.1_amd64.snap
+  # install_method: try   # "dangerous" (snap install) or "try" (snap try)
 
 # Sunbeam cluster settings
 sunbeam:
@@ -65,12 +65,11 @@ sunbeam:
   #   bm0:
   #     - control
   #     - compute
-  #     - storage
   #   bm1:
-  #     - compute
   #     - storage
   #   bm2:
   #     - compute
+  #     - storage
 
   # Push the Terraform-generated manifest.yaml to all VMs
   manifest: true
@@ -98,7 +97,7 @@ timeouts:
   snap_install: 600        # Snap install timeout
   prepare_node: 600        # sunbeam prepare-node-script timeout
   cluster_bootstrap: 7200  # Cluster bootstrap (can take 30-60+ min)
-  cluster_join: 3600       # Cluster join per node
+  cluster_join: 5400       # Cluster join per node
   terraform_apply: 3600    # Terraform apply timeout
 
 # Concurrency control
