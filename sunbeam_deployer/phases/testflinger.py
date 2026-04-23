@@ -227,7 +227,7 @@ def _wait_for_ready(
             state = get_job_status(job_id)
 
             if state != last_state:
-                log.info("Job %s phase: %s", job_id[:12], state or "(unknown)")
+                log.info("Job %s phase: %s", job_id[:8], state or "(unknown)")
                 last_state = state
 
             if state in _READY_PHASES:
