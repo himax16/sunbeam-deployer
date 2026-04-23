@@ -73,11 +73,11 @@ def _deploy_single_vm(
     _wait_ready(cfg, mon, vm, label)
     _install_snap(cfg, mon, vm, label)
     _setup_alias(cfg, mon, vm, label)
+    _prepare_node(cfg, mon, vm, label)
 
     if cfg.snap.source == "local":
         _connect_interfaces(cfg, mon, vm, label)
 
-    _prepare_node(cfg, mon, vm, label)
     _push_manifest(cfg, mon, infra, vm, label)
 
 
@@ -192,8 +192,8 @@ def _connect_interfaces(
                 vm, f"sudo snap connect {iface}", timeout=30, stream=False
             )
             if not result.ok:
-                log.warning(
-                    "Interface connect may have failed on %s: %s", vm, iface
+                raise RuntimeError(
+                    f"Snap interface connection failed on {vm}: {iface}"
                 )
 
 
