@@ -1,8 +1,170 @@
-"""Tests for sunbeam_deployer.phases.cluster — token extraction."""
+"""Tests for sunbeam_deployer.phases.cluster."""
 
 from __future__ import annotations
 
-from sunbeam_deployer.phases.cluster import _extract_token
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from sunbeam_deployer.config import load_config
+from sunbeam_deployer.monitor import DeploymentMonitor
+from sunbeam_deployer.phases.cluster import (
+    _extract_token,
+    _resolve_cluster_nodes,
+    run_phase,
+)
+from sunbeam_deployer.phases.host_setup import ComputeNode, InfraInfo
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_node(name: str) -> ComputeNode:
+    return ComputeNode(
+        name=name,
+        fqdn=f"{name}.test.local",
+        hostname=name,
+        ip=f"10.0.0.{ord(name[-1])}",
+        roles=["control", "compute"],
+    )
+
+
+def _make_infra(*names: str) -> InfraInfo:
+    return InfraInfo(
+        nodes=[_make_node(n) for n in names],
+        plan_dir="/tmp/plan",
+        manifest_path="/tmp/manifest.yaml",
+        ssh_private_key_path="/tmp/key",
+    )
+
+
+def _make_cfg(cluster_node_count: int = 0):
+    cfg = load_config(None)
+    cfg.sunbeam.cluster_node_count = cluster_node_count
+    return cfg
+
+
+# ---------------------------------------------------------------------------
+# _resolve_cluster_nodes
+# ---------------------------------------------------------------------------
+
+
+class TestResolveClusterNodes:
+    def test_zero_returns_all_nodes(self) -> None:
+        cfg = _make_cfg(cluster_node_count=0)
+        infra = _make_infra("bm0", "bm1", "bm2")
+        result = _resolve_cluster_nodes(cfg, infra)
+        assert [n.name for n in result] == [
+            "bm0",
+            "bm1",
+            "bm2",
+        ]
+
+    def test_count_one_returns_first_node(self) -> None:
+        cfg = _make_cfg(cluster_node_count=1)
+        infra = _make_infra("bm0", "bm1", "bm2")
+        result = _resolve_cluster_nodes(cfg, infra)
+        assert [n.name for n in result] == ["bm0"]
+
+    def test_count_two_returns_first_two(self) -> None:
+        cfg = _make_cfg(cluster_node_count=2)
+        infra = _make_infra("bm0", "bm1", "bm2")
+        result = _resolve_cluster_nodes(cfg, infra)
+        assert [n.name for n in result] == ["bm0", "bm1"]
+
+    def test_count_exceeding_total_returns_all(self) -> None:
+        cfg = _make_cfg(cluster_node_count=10)
+        infra = _make_infra("bm0", "bm1")
+        result = _resolve_cluster_nodes(cfg, infra)
+        assert [n.name for n in result] == ["bm0", "bm1"]
+
+    def test_count_equal_to_total_returns_all(self) -> None:
+        cfg = _make_cfg(cluster_node_count=3)
+        infra = _make_infra("bm0", "bm1", "bm2")
+        result = _resolve_cluster_nodes(cfg, infra)
+        assert [n.name for n in result] == [
+            "bm0",
+            "bm1",
+            "bm2",
+        ]
+
+
+# ---------------------------------------------------------------------------
+# run_phase — single-node
+# ---------------------------------------------------------------------------
+
+
+class TestRunPhaseSingleNode:
+    @patch("sunbeam_deployer.phases.cluster.run_in_vm")
+    def test_single_node_skips_dns_and_join(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = MagicMock(ok=True, stdout="")
+        cfg = _make_cfg(cluster_node_count=1)
+        mon = DeploymentMonitor()
+        infra = _make_infra("bm0", "bm1", "bm2")
+
+        run_phase(cfg, mon, infra)
+
+        cmds = [call.args[1] for call in mock_run.call_args_list]
+        assert any("bootstrap" in c for c in cmds)
+        assert not any("cluster add" in c for c in cmds)
+        assert not any("cluster join" in c for c in cmds)
+        assert not any("getent" in c for c in cmds)
+
+
+# ---------------------------------------------------------------------------
+# run_phase — multi-node
+# ---------------------------------------------------------------------------
+
+
+class TestRunPhaseMultiNode:
+    @patch("sunbeam_deployer.phases.cluster.run_in_vm")
+    def test_all_nodes_default(self, mock_run: MagicMock) -> None:
+        """With count=0, all nodes bootstrap + join."""
+        token = "eyJ0ZXN0IjoiYWJjZGVmMTIzNDU2Nzg5MCJ9"
+        mock_run.return_value = MagicMock(ok=True, stdout=f"token: {token}\n")
+        cfg = _make_cfg(cluster_node_count=0)
+        mon = DeploymentMonitor()
+        infra = _make_infra("bm0", "bm1", "bm2")
+
+        run_phase(cfg, mon, infra)
+
+        cmds = [call.args[1] for call in mock_run.call_args_list]
+        assert any("getent" in c for c in cmds)
+        assert any("bootstrap" in c for c in cmds)
+        assert sum("cluster add" in c for c in cmds) == 2
+        assert sum("cluster join" in c for c in cmds) == 2
+
+    @patch("sunbeam_deployer.phases.cluster.run_in_vm")
+    def test_subset_join(self, mock_run: MagicMock) -> None:
+        """With count=2, only first 2 nodes cluster."""
+        token = "eyJ0ZXN0IjoiYWJjZGVmMTIzNDU2Nzg5MCJ9"
+        mock_run.return_value = MagicMock(ok=True, stdout=f"token: {token}\n")
+        cfg = _make_cfg(cluster_node_count=2)
+        mon = DeploymentMonitor()
+        infra = _make_infra("bm0", "bm1", "bm2")
+
+        run_phase(cfg, mon, infra)
+
+        cmds = [call.args[1] for call in mock_run.call_args_list]
+        assert any("bootstrap" in c for c in cmds)
+        assert sum("cluster add" in c for c in cmds) == 1
+        assert sum("cluster join" in c for c in cmds) == 1
+
+
+# ---------------------------------------------------------------------------
+# run_phase — error cases
+# ---------------------------------------------------------------------------
+
+
+class TestRunPhaseErrors:
+    def test_no_nodes_raises(self) -> None:
+        cfg = _make_cfg()
+        mon = DeploymentMonitor()
+        infra = _make_infra()
+
+        with pytest.raises(RuntimeError, match="No compute nodes"):
+            run_phase(cfg, mon, infra)
 
 
 class TestExtractToken:

@@ -91,9 +91,17 @@ VM metadata comes from `terraform output -json compute_nodes`, not generated YAM
 
 Per-node roles: `config.sunbeam.node_roles[name]` > Terraform output `roles` > `config.sunbeam.roles` (global default).
 
+### Cluster Node Count
+
+`config.sunbeam.cluster_node_count` controls how many VMs participate in the Sunbeam cluster:
+
+- `0` (default): all Terraform VMs join the cluster.
+- `1`: single-node cluster — bootstrap only, no join, DNS validation skipped.
+- `N`: first *N* VMs (in Terraform output order) join; remaining VMs are still deployed (snap installed, prepared) but excluded from bootstrap/join.
+
 ### Concurrency
 
-- Phase 2 (VM deploy): `ThreadPoolExecutor`, max workers from `config.concurrency.vm_deploy`.
+- Phase 2 (VM deploy): `ThreadPoolExecutor`, max workers from `config.concurrency.vm_deploy`. All VMs are deployed regardless of `cluster_node_count`.
 - Phase 3 (Cluster): Strictly sequential. Bootstrap first, then join one node at a time. Never parallelize joins.
 
 ### Sunbeam CLI Syntax
@@ -113,7 +121,7 @@ Edit these with extra caution — bugs here caused real deployment failures:
 |----------------|------|--------|
 | `executor.py` — `run_host()`, `_run_via_ssh()` | **High** | All remote execution routes through here. Breaking SSH routing breaks everything. |
 | `host_setup.py` — `_parse_terraform_outputs()` | **High** | Source of truth for VM metadata. Wrong parsing cascades to Phase 2 and 3. |
-| `cluster.py` — `_extract_token()`, `_join_node()` | **High** | Token parsing and join syntax are fragile. Positional arg order matters. |
+| `cluster.py` — `_extract_token()`, `_join_node()`, `_resolve_cluster_nodes()` | **High** | Token parsing and join syntax are fragile. Positional arg order matters. Node filtering logic determines cluster topology. |
 | `config.py` — `_deep_merge()`, path handling | **Medium** | `~` must stay unexpanded for `repo_dir`. `_deep_merge` must not clobber nested keys. |
 | `vm_deploy.py` — `_push_manifest()` | **Medium** | Must use `run_host("test -f ...")` not `os.path.exists()` for remote checks. |
 

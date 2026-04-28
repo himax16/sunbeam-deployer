@@ -44,6 +44,7 @@ _DEFAULTS: dict[str, Any] = {
         "manifest": True,
         "accept_defaults": False,
         "bootstrap_extra_args": [],
+        "cluster_node_count": 0,
     },
     "terraform": {
         "extra_args": [],
@@ -125,6 +126,19 @@ class SunbeamConfig:
     manifest: bool
     accept_defaults: bool
     bootstrap_extra_args: list[str]
+    cluster_node_count: int
+
+    def validate(self) -> list[str]:
+        errors: list[str] = []
+        if (
+            not isinstance(self.cluster_node_count, int)
+            or self.cluster_node_count < 0
+        ):
+            errors.append(
+                "sunbeam.cluster_node_count must be a"
+                " non-negative integer (0 = all nodes)"
+            )
+        return errors
 
 
 @dataclass
@@ -207,6 +221,7 @@ class DeployConfig:
             errors.append("MAAS mode is not yet supported — use 'manual'")
         errors.extend(self.testflinger.validate())
         errors.extend(self.snap.validate())
+        errors.extend(self.sunbeam.validate())
         return errors
 
 

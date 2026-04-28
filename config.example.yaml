@@ -77,6 +77,14 @@ sunbeam:
   # Use --accept-defaults for the bootstrap command (no interactive prompts)
   accept_defaults: false
 
+  # Number of nodes to include in the Sunbeam cluster.
+  # 0 (default) = all nodes join the cluster.
+  # 1 = single-node cluster (bootstrap only, no join).
+  # N = first N nodes from Terraform output join the cluster.
+  # Remaining VMs are still deployed (snap installed, prepared) but
+  # do not participate in bootstrap/join.
+  # cluster_node_count: 0
+
   # Extra arguments appended to the bootstrap command
   # bootstrap_extra_args: []
 

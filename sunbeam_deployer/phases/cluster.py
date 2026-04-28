@@ -30,11 +30,22 @@ def run_phase(
                 "No compute nodes found — cannot bootstrap cluster"
             )
 
-        primary = infra.nodes[0]
-        secondaries = infra.nodes[1:]
+        cluster_nodes = _resolve_cluster_nodes(cfg, infra)
 
-        # Validate DNS resolution across nodes before clustering
-        _validate_dns(cfg, mon, infra)
+        primary = cluster_nodes[0]
+        secondaries = cluster_nodes[1:]
+
+        log.info(
+            "Cluster topology: primary=%s, secondaries=[%s]",
+            primary.hostname,
+            ", ".join(n.hostname for n in secondaries),
+        )
+
+        # Validate DNS resolution across cluster nodes
+        if len(cluster_nodes) > 1:
+            _validate_dns(cfg, mon, cluster_nodes)
+        else:
+            log.info("Single-node cluster — skipping DNS validation")
 
         # Bootstrap the primary node
         _bootstrap(cfg, mon, primary)
@@ -50,6 +61,32 @@ def run_phase(
         raise
 
 
+def _resolve_cluster_nodes(
+    cfg: DeployConfig,
+    infra: InfraInfo,
+) -> list[ComputeNode]:
+    """Return the nodes that participate in the cluster.
+
+    When ``cfg.sunbeam.cluster_node_count`` is set to a positive
+    integer, only the first *N* nodes from Terraform output
+    participate.  When 0 (the default), all nodes participate.
+    """
+    count = cfg.sunbeam.cluster_node_count
+
+    if count == 0 or count >= len(infra.nodes):
+        return infra.nodes
+
+    cluster_nodes = infra.nodes[:count]
+    skipped = infra.nodes[count:]
+
+    log.info(
+        "Nodes excluded from cluster: %s",
+        ", ".join(n.hostname for n in skipped),
+    )
+
+    return cluster_nodes
+
+
 # ---------------------------------------------------------------------------
 # Steps
 # ---------------------------------------------------------------------------
@@ -58,15 +95,15 @@ def run_phase(
 def _validate_dns(
     cfg: DeployConfig,
     mon: DeploymentMonitor,
-    infra: InfraInfo,
+    nodes: list[ComputeNode],
 ) -> None:
-    """Check that each node can resolve every other node's FQDN."""
+    """Check that each cluster node can resolve every other's FQDN."""
     with mon.run_step(
         PHASE, "dns-validation", "Validate cross-node DNS resolution"
     ):
         all_ok = True
-        for src in infra.nodes:
-            for dst in infra.nodes:
+        for src in nodes:
+            for dst in nodes:
                 if src.name == dst.name:
                     continue
                 result = run_in_vm(

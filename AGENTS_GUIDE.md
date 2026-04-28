@@ -180,7 +180,16 @@ sunbeam:
     bm2: [compute]
   manifest: true                   # Push Terraform manifest to VMs
   accept_defaults: false           # Use --accept-defaults on bootstrap
+  cluster_node_count: 0            # 0 = all nodes; N = first N nodes
 ```
+
+**`cluster_node_count`**: Controls how many VMs join the Sunbeam cluster.
+
+- `0` (default) — all Terraform VMs join the cluster (backward-compatible).
+- `1` — single-node cluster: bootstrap only, no join, DNS validation skipped.
+- `N` — first *N* VMs (in Terraform output order) join; remaining VMs are
+  still fully deployed in Phase 2 (snap installed, prepared) but excluded
+  from Phase 3 (no bootstrap/join).
 
 **Role Priority**: `config node_roles` > `Terraform output roles` > `global roles default`
 
@@ -462,14 +471,17 @@ The tool waits for `reserve` (or `test`) before proceeding.
 
 ### Phase 3: Cluster (`cluster`)
 
-**Purpose**: Bootstrap the Sunbeam cluster and join additional nodes.
+**Purpose**: Bootstrap the Sunbeam cluster and join additional nodes. Only nodes
+selected by `cluster_node_count` participate (default: all).
 
 **Steps**:
-1. **dns-validation**: Verify every node can `getent hosts` every other node's FQDN
-2. **bootstrap-bm0**: Run `sunbeam -v cluster bootstrap` on the first node
-3. **join-bm1**: Generate token on bm0, join bm1
-4. **join-bm2**: Generate token on bm0, join bm2
-5. ... (one join step per additional node)
+1. **Resolve cluster nodes**: Select the first *N* VMs (or all when count is 0)
+2. **dns-validation**: Verify every cluster node can `getent hosts` every other
+   cluster node's FQDN (skipped for single-node clusters)
+3. **bootstrap-bm0**: Run `sunbeam -v cluster bootstrap` on the first selected node
+4. **join-bm1**: Generate token on bm0, join bm1
+5. **join-bm2**: Generate token on bm0, join bm2
+6. ... (one join step per additional cluster node)
 
 **Key Details**:
 - **Token generation**: `sunbeam cluster add --format yaml <FQDN>` — `<FQDN>` is positional
@@ -477,6 +489,10 @@ The tool waits for `reserve` (or `test`) before proceeding.
 - **Join command**: `sunbeam -v cluster join --role <roles> <TOKEN>` — `<TOKEN>` is positional
 - Join is sequential (one node at a time) to avoid cluster races
 - Bootstrap typically takes 30-60 minutes; joins take 40-45 minutes each
+- **Single-node cluster**: When `cluster_node_count: 1`, DNS validation and join
+  steps are skipped entirely; only bootstrap runs
+- Non-cluster VMs (excluded by count) still have the snap installed and are prepared
+  in Phase 2, enabling later manual expansion
 
 ---
 
@@ -812,8 +828,10 @@ The logger automatically redacts sensitive patterns from both file and terminal 
 - **Phase 2 (VM Deploy)** uses a `ThreadPoolExecutor` with configurable max workers
   (default: 2). Each VM is deployed in its own thread.
 - **Phase 3 (Cluster)** is strictly sequential: bootstrap first, then join one
-  node at a time to avoid cluster coordination races.
-- **DNS validation** checks all N×(N-1) pairs before any clustering begins.
+  node at a time to avoid cluster coordination races. Only nodes selected by
+  `cluster_node_count` participate.
+- **DNS validation** checks all N×(N-1) pairs among selected cluster nodes before
+  any clustering begins. Skipped for single-node clusters.
 
 ---
 
@@ -832,9 +850,11 @@ Based on real deployment data (3-node cluster on Testflinger):
 | Cluster bootstrap (bm0) | 30-60 min | 7200s (2 hr) |
 | Cluster join (per node) | 40-45 min | 3600s (1 hr) |
 | **Total (3-node cluster)** | **1.5-2 hours** | — |
+| **Total (single-node cluster)** | **~1 hour** | — |
 
 **Note**: The cluster phase dominates total deployment time. Bootstrap and joins
 involve Juju model deployment, charm installation, and service orchestration.
+Single-node clusters (`cluster_node_count: 1`) skip join steps entirely.
 
 ---
 

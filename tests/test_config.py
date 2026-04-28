@@ -285,3 +285,31 @@ class TestValidation:
         yaml_file.write_text("deploy_mode: invalid_mode\n")
         with pytest.raises(ValueError, match="Configuration errors"):
             load_config(yaml_file)
+
+    def test_cluster_node_count_valid(self) -> None:
+        cfg = load_config(None)
+        cfg.sunbeam.cluster_node_count = 0
+        assert cfg.sunbeam.validate() == []
+        cfg.sunbeam.cluster_node_count = 3
+        assert cfg.sunbeam.validate() == []
+
+    def test_cluster_node_count_negative(self) -> None:
+        cfg = load_config(None)
+        cfg.sunbeam.cluster_node_count = -1
+        errors = cfg.sunbeam.validate()
+        assert any("cluster_node_count" in e for e in errors)
+
+    def test_cluster_node_count_default(self) -> None:
+        cfg = load_config(None)
+        assert cfg.sunbeam.cluster_node_count == 0
+
+    def test_cluster_node_count_from_yaml(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "config.yaml"
+        yaml_file.write_text(
+            textwrap.dedent("""\
+            sunbeam:
+              cluster_node_count: 1
+        """)
+        )
+        cfg = load_config(yaml_file)
+        assert cfg.sunbeam.cluster_node_count == 1
