@@ -7,6 +7,7 @@ import logging
 import sys
 
 from sunbeam_deployer import __version__
+from sunbeam_deployer.commands import list_jobs
 from sunbeam_deployer.config import DeployConfig, load_config
 from sunbeam_deployer.executor import RemoteTarget, set_remote_target
 from sunbeam_deployer.logger import setup_logging
@@ -22,6 +23,54 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-V", "--version", action="version", version=f"%(prog)s {__version__}"
     )
+
+    # Create subcommands
+    subparsers = parser.add_subparsers(
+        dest="command",
+        help="Available commands",
+    )
+
+    # deploy command (default behavior, no subcommand required)
+    deploy_parser = subparsers.add_parser(
+        "deploy",
+        help="Deploy Sunbeam on Testflinger machine (default if no command)",
+    )
+    _add_deploy_args(deploy_parser)
+
+    # list-jobs command
+    list_parser = subparsers.add_parser(
+        "list-jobs",
+        help="List all Testflinger jobs and their IP addresses",
+    )
+    list_parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Enable verbose (DEBUG) output",
+    )
+    list_parser.add_argument(
+        "-a",
+        "--all",
+        action="store_true",
+        help="Show all jobs (including waiting/completed); "
+        "by default only shows active/ready jobs",
+    )
+    list_parser.add_argument(
+        "-f",
+        "--format",
+        choices=["table", "json"],
+        default="table",
+        help="Output format (default: table)",
+    )
+
+    # Make deploy args available at top level too (for backward compatibility)
+    _add_deploy_args(parser)
+
+    return parser
+
+
+def _add_deploy_args(parser: argparse.ArgumentParser) -> None:
+    """Add deployment-specific arguments to a parser."""
     parser.add_argument(
         "-c",
         "--config",
@@ -130,7 +179,6 @@ def build_parser() -> argparse.ArgumentParser:
             "deployment fails (releases the machine)"
         ),
     )
-    return parser
 
 
 def apply_cli_overrides(cfg: DeployConfig, args: argparse.Namespace) -> None:
@@ -202,6 +250,30 @@ def _prompt_cancel_job(logger: logging.Logger, job_id: str) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    # Handle list-jobs command
+    if args.command == "list-jobs":
+        # Set up minimal logging for list-jobs
+        if args.verbose:
+            logging.basicConfig(
+                level=logging.DEBUG,
+                format="%(levelname)-8s %(name)s: %(message)s",
+            )
+        else:
+            logging.basicConfig(
+                level=logging.WARNING,
+                format="%(message)s",
+            )
+
+        return list_jobs(
+            all_jobs=args.all,
+            output_format=args.format,
+        )
+
+    # Default to deploy behavior if no command or explicit deploy command
+    if args.command not in ("deploy", None):
+        parser.print_help()
+        return 1
 
     # Load config
     try:
