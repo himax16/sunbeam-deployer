@@ -191,7 +191,7 @@ sunbeam:
   still fully deployed in Phase 2 (snap installed, prepared) but excluded
   from Phase 3 (no bootstrap/join).
 
-**Role Priority**: `config node_roles` > `Terraform output roles` > `global roles default`
+**Role Priority**: `config node_roles` > `global roles default` > `Terraform output roles`
 
 #### 3.4 Timeouts
 

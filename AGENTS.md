@@ -89,7 +89,7 @@ VM metadata comes from `terraform output -json compute_nodes`, not generated YAM
 
 ### Role Priority
 
-Per-node roles: `config.sunbeam.node_roles[name]` > Terraform output `roles` > `config.sunbeam.roles` (global default).
+Per-node roles: `config.sunbeam.node_roles[name]` > `config.sunbeam.roles` (global default) > Terraform output `roles`.
 
 ### Cluster Node Count
 

@@ -155,13 +155,15 @@ def _parse_terraform_outputs(
         nodes: list[ComputeNode] = []
         for node_data in nodes_json:
             name = node_data["name"]
-            # Priority: config node_roles > Terraform roles > global default
+            # Priority: config node_roles > global default > Terraform roles
             if name in cfg.sunbeam.node_roles:
                 roles = cfg.sunbeam.node_roles[name]
+            elif cfg.sunbeam.roles:
+                roles = cfg.sunbeam.roles
             elif node_data.get("roles"):
                 roles = node_data["roles"]
             else:
-                roles = cfg.sunbeam.roles
+                roles = ["control", "compute"]
 
             nodes.append(
                 ComputeNode(
