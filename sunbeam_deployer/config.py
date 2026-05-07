@@ -209,6 +209,7 @@ class DeployConfig:
     logging: LoggingConfig
     timeouts: TimeoutsConfig
     concurrency: ConcurrencyConfig
+    device_ip: str | None = None
 
     def validate(self) -> list[str]:
         errors: list[str] = []
@@ -233,35 +234,35 @@ class DeployConfig:
 def load_config(path: str | Path | None = None) -> DeployConfig:
     """Load configuration from a YAML file, merged with defaults.
 
-    If *path* is ``None`` the pure defaults are returned.
+    If *path* is ``None`` the default configuration is returned.
     """
     raw: dict[str, Any] = {}
     if path is not None:
-        with open(path) as fh:
+        with open(path, encoding="utf-8") as fh:
             raw = yaml.safe_load(fh) or {}
 
-    merged = _deep_merge(_DEFAULTS, raw)
+    merged_config = _deep_merge(_DEFAULTS, raw)
 
-    tf_raw = merged["testflinger"]
+    tf_raw = merged_config["testflinger"]
     if tf_raw.get("job_file"):
         tf_raw["job_file"] = os.path.expanduser(tf_raw["job_file"])
     if tf_raw.get("ssh_key_path"):
         tf_raw["ssh_key_path"] = os.path.expanduser(tf_raw["ssh_key_path"])
 
     cfg = DeployConfig(
-        deploy_mode=merged["deploy_mode"],
-        repo_url=merged["repo_url"],
-        repo_branch=merged["repo_branch"],
+        deploy_mode=merged_config["deploy_mode"],
+        repo_url=merged_config["repo_url"],
+        repo_branch=merged_config["repo_branch"],
         # Keep ~ unexpanded — the remote shell expands it when running via SSH.
         # For local execution the shell in subprocess also expands ~.
-        repo_dir=merged["repo_dir"],
+        repo_dir=merged_config["repo_dir"],
         testflinger=TestflingerConfig(**tf_raw),
-        snap=SnapConfig(**merged["snap"]),
-        sunbeam=SunbeamConfig(**merged["sunbeam"]),
-        terraform=TerraformConfig(**merged["terraform"]),
-        logging=LoggingConfig(**merged["logging"]),
-        timeouts=TimeoutsConfig(**merged["timeouts"]),
-        concurrency=ConcurrencyConfig(**merged["concurrency"]),
+        snap=SnapConfig(**merged_config["snap"]),
+        sunbeam=SunbeamConfig(**merged_config["sunbeam"]),
+        terraform=TerraformConfig(**merged_config["terraform"]),
+        logging=LoggingConfig(**merged_config["logging"]),
+        timeouts=TimeoutsConfig(**merged_config["timeouts"]),
+        concurrency=ConcurrencyConfig(**merged_config["concurrency"]),
     )
 
     errors = cfg.validate()

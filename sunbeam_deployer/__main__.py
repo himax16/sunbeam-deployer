@@ -16,6 +16,7 @@ from sunbeam_deployer.phases import cluster, host_setup, testflinger, vm_deploy
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Construct argument parser for the CLI."""
     parser = argparse.ArgumentParser(
         prog="sunbeam-deployer",
         description="Automated Sunbeam deployment on Testflinger machines.",
@@ -33,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     # deploy command (default behavior, no subcommand required)
     deploy_parser = subparsers.add_parser(
         "deploy",
-        help="Deploy Sunbeam on Testflinger machine (default if no command)",
+        help="Deploy Sunbeam (default if no command specified)",
     )
     _add_deploy_args(deploy_parser)
 
@@ -87,16 +88,18 @@ def _add_deploy_args(parser: argparse.ArgumentParser) -> None:
     # Allow running individual phases
     parser.add_argument(
         "--phase",
-        choices=["all", "testflinger", "host-setup", "vm-deploy", "cluster"],
         default="all",
         help=(
-            "Run a specific phase instead of the full deployment (default: all)"
+            "Comma-separated list of phases to run: "
+            "testflinger,host-setup,vm-deploy,cluster "
+            "or 'all' for everything (default: all)"
         ),
     )
 
     # Testflinger options
     tf_group = parser.add_argument_group(
-        "testflinger", "Testflinger machine provisioning"
+        "Testflinger options",
+        "Options for provisioning or connecting to Testflinger machines",
     )
     tf_group.add_argument(
         "--testflinger",
@@ -197,7 +200,7 @@ def apply_cli_overrides(cfg: DeployConfig, args: argparse.Namespace) -> None:
     if args.device_ip:
         # --device-ip skips testflinger entirely, goes straight to SSH
         cfg.testflinger.enabled = False
-        cfg._direct_ip = args.device_ip
+        cfg.device_ip = args.device_ip
 
     # Snap overrides
     if args.snap_channel:
@@ -248,6 +251,7 @@ def _prompt_cancel_job(logger: logging.Logger, job_id: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Main entry point for the CLI."""
     parser = build_parser()
     args = parser.parse_args(argv)
 
@@ -270,8 +274,8 @@ def main(argv: list[str] | None = None) -> int:
             output_format=args.format,
         )
 
-    # Default to deploy behavior if no command or explicit deploy command
-    if args.command not in ("deploy", None):
+    # Print help if command is None or not recognized
+    if not args.command or args.command not in ("deploy",):
         parser.print_help()
         return 1
 
@@ -296,22 +300,37 @@ def main(argv: list[str] | None = None) -> int:
     logger = setup_logging(cfg.logging.log_dir, cfg.logging.verbose)
     logger.info("Sunbeam Deployer v%s", __version__)
     logger.info("Deploy mode: %s", cfg.deploy_mode)
-    logger.info(
-        "Snap source: %s (channel=%s)", cfg.snap.source, cfg.snap.channel
-    )
+    if cfg.snap.source == "local":
+        logger.info("Snap source: %s", cfg.snap.local_path)
+    else:
+        logger.info("Snap source: Snapstore channel=%s", cfg.snap.channel)
+
+    # Parse --phase into a list
+    all_phases = ["testflinger", "host-setup", "vm-deploy", "cluster"]
+    if args.phase == "all":
+        phases = list(all_phases)
+    else:
+        phases = [p.strip() for p in args.phase.split(",")]
+        invalid = [p for p in phases if p not in all_phases]
+        if invalid:
+            logger.error(
+                "Invalid phase(s): %s. Valid: %s",
+                ", ".join(invalid),
+                ", ".join(all_phases),
+            )
+            return 1
 
     # Set up monitor
     mon = DeploymentMonitor()
-    phase = args.phase
     infra = None
     # Track whether we submitted the TF job (vs. attaching to existing)
     submitted_job = False
 
     try:
         # Phase 0: Testflinger provisioning (or direct SSH)
-        direct_ip = getattr(cfg, "_direct_ip", None)
+        direct_ip = cfg.device_ip
 
-        if phase in ("all", "testflinger") and cfg.testflinger.enabled:
+        if "testflinger" in phases and cfg.testflinger.enabled:
             pre_job_id = cfg.testflinger.job_id
             testflinger.run_phase(cfg, mon)
             if not pre_job_id and cfg.testflinger.job_id:
@@ -329,18 +348,18 @@ def main(argv: list[str] | None = None) -> int:
             set_remote_target(
                 RemoteTarget(host=direct_ip, user=ssh_user, key_path=ssh_key)
             )
-        elif phase == "testflinger":
+        elif "testflinger" in phases:
             logger.error(
-                "Testflinger is not enabled — use --testflinger or config"
+                "Testflinger is not enabled — use --testflinger or config file"
             )
             return 1
 
         # Phase 1: Host setup
-        if phase in ("all", "host-setup"):
+        if "host-setup" in phases:
             infra = host_setup.run_phase(cfg, mon)
 
         # For single-phase runs, reconstruct infra from terraform
-        if infra is None and phase in ("vm-deploy", "cluster"):
+        if infra is None and ("vm-deploy" in phases or "cluster" in phases):
             logger.info(
                 "Reconstructing infrastructure info from Terraform outputs…"
             )
@@ -356,12 +375,12 @@ def main(argv: list[str] | None = None) -> int:
             tmp_mon.end_phase(HS_PHASE, Status.SUCCESS)
 
         # Phase 2: VM deployment
-        if phase in ("all", "vm-deploy"):
+        if "vm-deploy" in phases:
             assert infra is not None
             vm_deploy.run_phase(cfg, mon, infra)
 
         # Phase 3: Cluster bootstrap + join
-        if phase in ("all", "cluster"):
+        if "cluster" in phases:
             assert infra is not None
             cluster.run_phase(cfg, mon, infra)
 

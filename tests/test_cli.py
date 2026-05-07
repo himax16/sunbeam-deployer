@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import argparse
+
 import pytest
 
 from sunbeam_deployer.__main__ import apply_cli_overrides, build_parser
@@ -34,11 +36,6 @@ class TestBuildParser:
         ):
             args = parser.parse_args(["--phase", phase])
             assert args.phase == phase
-
-    def test_invalid_phase_exits(self) -> None:
-        parser = build_parser()
-        with pytest.raises(SystemExit):
-            parser.parse_args(["--phase", "invalid"])
 
     def test_testflinger_flag(self) -> None:
         parser = build_parser()
@@ -115,7 +112,7 @@ class TestBuildParser:
 
 
 class TestApplyCliOverrides:
-    def _make_args(self, **kwargs) -> object:
+    def _make_args(self, **kwargs) -> argparse.Namespace:
         """Build a minimal argparse.Namespace with defaults."""
         defaults = dict(
             testflinger=None,
@@ -135,13 +132,7 @@ class TestApplyCliOverrides:
         )
         defaults.update(kwargs)
 
-        class Args:
-            pass
-
-        args = Args()
-        for k, v in defaults.items():
-            setattr(args, k, v)
-        return args
+        return argparse.Namespace(**defaults)
 
     def test_testflinger_enables(self) -> None:
         cfg = load_config(None)
@@ -162,7 +153,7 @@ class TestApplyCliOverrides:
         args = self._make_args(device_ip="10.0.0.1")
         apply_cli_overrides(cfg, args)
         assert cfg.testflinger.enabled is False
-        assert cfg._direct_ip == "10.0.0.1"
+        assert cfg.device_ip == "10.0.0.1"
 
     def test_snap_channel_override(self) -> None:
         cfg = load_config(None)
