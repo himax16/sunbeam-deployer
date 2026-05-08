@@ -227,7 +227,7 @@ def _run_subprocess(
 
         stdout_lines: list[str] = []
 
-        if input_text:
+        if input_text and proc.stdin:
             proc.stdin.write(input_text)
             proc.stdin.close()
             proc.stdin = None  # prevent communicate() from re-closing
@@ -244,7 +244,6 @@ def _run_subprocess(
                 stdout_lines.append(line)
                 if stream:
                     log.debug("  | %s", line)
-
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait()

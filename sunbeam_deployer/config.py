@@ -164,6 +164,8 @@ class TimeoutsConfig:
 
 @dataclass
 class TestflingerConfig:
+    __test__ = False
+
     enabled: bool
     job_id: str | None
     job_file: str | None
@@ -181,12 +183,13 @@ class TestflingerConfig:
             return errors
         if self.job_id and self.job_file:
             errors.append(
-                "testflinger: specify either job_id (attach)"
+                "Testflinger: specify either job_id (attach)"
                 " or job_file (submit), not both"
             )
+        # Check for SSH keys if submitting a new job (job_id is not set)
         if not self.job_id and not self.job_file and not self.ssh_keys:
             errors.append(
-                "testflinger: ssh_keys are required when submitting a new job"
+                "Testflinger: ssh_keys are required when submitting a new job"
             )
         return errors
 

@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import argparse
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from sunbeam_deployer.__main__ import apply_cli_overrides, build_parser
+from sunbeam_deployer.__main__ import apply_cli_overrides, build_parser, main
 from sunbeam_deployer.config import load_config
 
 # ---------------------------------------------------------------------------
@@ -206,3 +207,101 @@ class TestApplyCliOverrides:
         assert cfg.deploy_mode == "manual"
         assert cfg.snap.channel == "2024.1/edge"
         assert cfg.testflinger.enabled is False
+
+    def test_tf_job_file_enables_and_sets(self) -> None:
+        cfg = load_config(None)
+        args = self._make_args(tf_job_file="/path/to/job.yaml")
+        apply_cli_overrides(cfg, args)
+        assert cfg.testflinger.enabled is True
+        assert cfg.testflinger.job_file == "/path/to/job.yaml"
+
+    def test_tf_ssh_key_sets_path(self) -> None:
+        cfg = load_config(None)
+        args = self._make_args(tf_ssh_key="/path/to/key")
+        apply_cli_overrides(cfg, args)
+        assert cfg.testflinger.ssh_key_path == "/path/to/key"
+
+    def test_snap_revision_sets_source(self) -> None:
+        cfg = load_config(None)
+        args = self._make_args(snap_revision="42")
+        apply_cli_overrides(cfg, args)
+        assert cfg.snap.revision == "42"
+        assert cfg.snap.source == "store"
+
+    def test_repo_dir_override(self) -> None:
+        cfg = load_config(None)
+        args = self._make_args(repo_dir="/custom/dir")
+        apply_cli_overrides(cfg, args)
+        assert cfg.repo_dir == "/custom/dir"
+
+
+# ---------------------------------------------------------------------------
+# main — testflinger auto-enable
+# ---------------------------------------------------------------------------
+
+
+class TestMainTestflingerAutoEnable:
+    @patch("sunbeam_deployer.__main__.testflinger")
+    @patch("sunbeam_deployer.__main__.setup_logging")
+    def test_phase_testflinger_auto_enables(
+        self,
+        mock_logging: MagicMock,
+        mock_tf_mod: MagicMock,
+    ) -> None:
+        """--phase testflinger enables testflinger by default."""
+        mock_logging.return_value = MagicMock()
+        mock_tf_mod.run_phase = MagicMock()
+        mock_tf_mod.PHASE = "testflinger"
+
+        # We need to mock load_config to return a config where
+        # testflinger is disabled and device_ip is None
+        cfg = load_config(None)
+        cfg.testflinger.enabled = False
+        cfg.device_ip = None
+        cfg.testflinger.ssh_keys = ["lp:test-key"]
+
+        with patch("sunbeam_deployer.__main__.load_config", return_value=cfg):
+            main(["deploy", "--phase", "testflinger"])
+
+        # Testflinger should have been auto-enabled
+        assert cfg.testflinger.enabled is True
+
+    @patch("sunbeam_deployer.__main__.testflinger")
+    @patch("sunbeam_deployer.__main__.setup_logging")
+    def test_phase_testflinger_not_enabled_with_device_ip(
+        self,
+        mock_logging: MagicMock,
+        mock_tf_mod: MagicMock,
+    ) -> None:
+        """--phase testflinger with --device-ip does NOT auto-enable."""
+        mock_logging.return_value = MagicMock()
+
+        cfg = load_config(None)
+        cfg.testflinger.enabled = False
+        cfg.device_ip = "10.0.0.1"
+
+        with (
+            patch("sunbeam_deployer.__main__.load_config", return_value=cfg),
+            patch(
+                "sunbeam_deployer.__main__.wait_for_ssh",
+                return_value=False,
+            ),
+        ):
+            main(["deploy", "--phase", "testflinger"])
+
+        assert cfg.testflinger.enabled is False
+
+
+# ---------------------------------------------------------------------------
+# main — invalid phase
+# ---------------------------------------------------------------------------
+
+
+class TestMainInvalidPhase:
+    @patch("sunbeam_deployer.__main__.setup_logging")
+    def test_invalid_phase_returns_error(self, mock_logging: MagicMock) -> None:
+        mock_logging.return_value = MagicMock()
+        cfg = load_config(None)
+        with patch("sunbeam_deployer.__main__.load_config", return_value=cfg):
+            result = main(["deploy", "--phase", "nonexistent"])
+        assert result == 1

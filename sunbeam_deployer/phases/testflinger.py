@@ -7,8 +7,6 @@ execute on the Testflinger machine.
 Reference: https://canonical-testflinger.readthedocs-hosted.com/latest/
 """
 
-from __future__ import annotations
-
 import json
 import logging
 import os
@@ -129,10 +127,30 @@ def _submit_job(cfg: DeployConfig, mon: DeploymentMonitor) -> str:
 
         if tf.job_file:
             job_file = tf.job_file
-            log.info("Submitting job from file: %s", job_file)
         else:
-            job_file = _generate_job_yaml(cfg)
-            log.info("Generated job YAML: %s", job_file)
+            # Prompt user input for SSH key
+            additional_ssh_keys = []
+            if not tf.ssh_keys:
+                # Prompt the user multiple times until empty input is given
+                while True:
+                    ssh_key_input = input(
+                        "Enter SSH key for Testflinger job"
+                        " (leave blank to finish): "
+                    ).strip()
+                    if not ssh_key_input:
+                        break
+                    additional_ssh_keys.append(ssh_key_input)
+
+            job_file = _generate_job_yaml(
+                cfg, additional_ssh_keys=additional_ssh_keys
+            )
+
+        log.info("Submitting Testflinger job using config file: %s", job_file)
+        with open(job_file, encoding="utf-8") as f:
+            log.debug(
+                "Testflinger job config:\n%s",
+                f.read(),
+            )
 
         result = run_local(
             ["testflinger", "submit", "--quiet", job_file],
@@ -148,7 +166,8 @@ def _submit_job(cfg: DeployConfig, mon: DeploymentMonitor) -> str:
             )
 
         log.info("Submitted Testflinger job: %s", job_id)
-        return job_id
+
+    return job_id
 
 
 def _snap_tmp_dir() -> str:
@@ -169,8 +188,10 @@ def _snap_tmp_dir() -> str:
     return d
 
 
-def _generate_job_yaml(cfg: DeployConfig) -> str:
-    """Generate a testflinger reserve-job YAML and return its path.
+def _generate_job_yaml(
+    cfg: DeployConfig, additional_ssh_keys: list[str]
+) -> str:
+    """Generate a Testflinger reserve-job YAML and return its path.
 
     The file is written to the ``testflinger-cli`` snap's
     user-common tmp directory so the snap process can read it.
@@ -193,8 +214,20 @@ def _generate_job_yaml(cfg: DeployConfig) -> str:
         },
     }
 
+    # Set SSH keys for the job
+    job_ssh_keys = []
+    if additional_ssh_keys:
+        job_ssh_keys.extend(additional_ssh_keys)
+
     if tf.ssh_keys:
-        job_data["reserve_data"]["ssh_keys"] = tf.ssh_keys
+        job_ssh_keys.extend(tf.ssh_keys)
+
+    if not job_ssh_keys:
+        raise RuntimeError(
+            "At least one SSH key is required for Testflinger job"
+        )
+
+    job_data["reserve_data"]["ssh_keys"] = job_ssh_keys
 
     fd, path = tempfile.mkstemp(
         suffix=".yaml",
@@ -204,7 +237,7 @@ def _generate_job_yaml(cfg: DeployConfig) -> str:
     with os.fdopen(fd, "w") as fh:
         yaml.safe_dump(job_data, fh, default_flow_style=False)
 
-    log.debug("Generated job YAML at %s", path)
+    log.debug("Generated Testflinger job config YAML: %s", path)
     return path
 
 
@@ -245,10 +278,10 @@ def _wait_for_ready(
             poll_interval = 15 if elapsed < 300 else 30
             time.sleep(poll_interval)
 
-        raise RuntimeError(
-            f"Testflinger job {job_id} did not reach 'reserve' state "
-            f"within {tf.provision_timeout}s (last state: {last_state})"
-        )
+    raise RuntimeError(
+        f"Testflinger job {job_id} did not reach 'reserve' state "
+        f"within {tf.provision_timeout}s (last state: {last_state})"
+    )
 
 
 def _get_device_ip(job_id: str, retries: int = 10, delay: float = 5.0) -> str:

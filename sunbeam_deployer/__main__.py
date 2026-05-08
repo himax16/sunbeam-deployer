@@ -9,7 +9,12 @@ import sys
 from sunbeam_deployer import __version__
 from sunbeam_deployer.commands import list_jobs
 from sunbeam_deployer.config import DeployConfig, load_config
-from sunbeam_deployer.executor import RemoteTarget, set_remote_target
+from sunbeam_deployer.executor import (
+    RemoteTarget,
+    get_remote_target,
+    set_remote_target,
+    wait_for_ssh,
+)
 from sunbeam_deployer.logger import setup_logging
 from sunbeam_deployer.monitor import DeploymentMonitor, Status
 from sunbeam_deployer.phases import cluster, host_setup, testflinger, vm_deploy
@@ -319,6 +324,13 @@ def main(argv: list[str] | None = None) -> int:
                 ", ".join(all_phases),
             )
             return 1
+    if (
+        "testflinger" in phases
+        and not cfg.testflinger.enabled
+        and not cfg.device_ip
+    ):
+        # Enable testflinger if phase is requested
+        cfg.testflinger.enabled = True
 
     # Set up monitor
     mon = DeploymentMonitor()
@@ -337,8 +349,6 @@ def main(argv: list[str] | None = None) -> int:
                 submitted_job = True
         elif direct_ip:
             # --device-ip: skip testflinger, set up SSH directly
-            from sunbeam_deployer.executor import wait_for_ssh
-
             logger.info("Connecting directly to %s", direct_ip)
             ssh_user = cfg.testflinger.ssh_user
             ssh_key = cfg.testflinger.ssh_key_path
@@ -348,11 +358,6 @@ def main(argv: list[str] | None = None) -> int:
             set_remote_target(
                 RemoteTarget(host=direct_ip, user=ssh_user, key_path=ssh_key)
             )
-        elif "testflinger" in phases:
-            logger.error(
-                "Testflinger is not enabled — use --testflinger or config file"
-            )
-            return 1
 
         # Phase 1: Host setup
         if "host-setup" in phases:
@@ -401,11 +406,19 @@ def main(argv: list[str] | None = None) -> int:
     if submitted_job and cfg.testflinger.job_id:
         _prompt_cancel_job(logger, cfg.testflinger.job_id)
     elif cfg.testflinger.job_id:
-        logger.info(
-            "Testflinger job: %s (use 'testflinger cancel %s' to release)",
-            cfg.testflinger.job_id,
-            cfg.testflinger.job_id,
-        )
+        remote_target = get_remote_target()
+        if remote_target:
+            logger.info(
+                "Allocated Testflinger job: %s on %s@%s",
+                cfg.testflinger.job_id,
+                remote_target.user,
+                remote_target.host,
+            )
+        else:
+            logger.info(
+                "Testflinger job: %s (failed to get connection info)",
+                cfg.testflinger.job_id,
+            )
 
     return 0
 
