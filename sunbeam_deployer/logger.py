@@ -6,8 +6,25 @@ import logging
 import os
 import re
 import sys
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
+
+# Per-thread indentation depth for terminal output.
+# 0 = top-level (phase headers), 1 = step-level, 2 = within-step.
+_indent_depth: ContextVar[int] = ContextVar("log_indent", default=0)
+_INDENT = "  "  # two spaces per level
+
+
+def set_log_indent(depth: int) -> None:
+    """Set the terminal log indentation depth for the current context."""
+    _indent_depth.set(depth)
+
+
+def get_log_indent() -> int:
+    """Return the current indentation depth."""
+    return _indent_depth.get()
+
 
 # Patterns that should be redacted in log output
 _SENSITIVE_PATTERNS = [
@@ -39,7 +56,7 @@ class _RedactingFormatter(logging.Formatter):
 
 
 class _TerminalFormatter(_RedactingFormatter):
-    """Coloured, concise terminal output."""
+    """Coloured, concise terminal output with context-aware indentation."""
 
     COLORS = {
         logging.DEBUG: "\033[90m",  # grey
@@ -53,15 +70,12 @@ class _TerminalFormatter(_RedactingFormatter):
 
     def format(self, record: logging.LogRecord) -> str:
         colour = self.COLORS.get(record.levelno, "")
-        phase = getattr(record, "phase", "")
-        step = getattr(record, "step", "")
-        prefix_parts = [p for p in (phase, step) if p]
-        prefix = f"[{'/'.join(prefix_parts)}] " if prefix_parts else ""
+        indent = _INDENT * _indent_depth.get()
         ts = datetime.fromtimestamp(record.created).strftime("%H:%M:%S")
         msg = _redact(record.getMessage())
         return (
-            f"{colour}{ts} {self.BOLD}{prefix}"
-            f"{self.RESET}{colour}{msg}{self.RESET}"
+            f"{colour}{ts} {indent}{self.BOLD}"
+            f"{self.RESET}{colour}{indent and ''}{msg}{self.RESET}"
         )
 
 

@@ -7,6 +7,8 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 
+from sunbeam_deployer.logger import set_log_indent
+
 log = logging.getLogger("sunbeam_deployer.monitor")
 
 
@@ -102,7 +104,9 @@ class DeploymentMonitor:
         phase = self._phase_map[name]
         phase.status = Status.RUNNING
         phase.start_time = time.monotonic()
+        set_log_indent(0)
         log.info("━━━ Phase: %s ━━━", name)
+        set_log_indent(1)
         return phase
 
     def end_phase(
@@ -111,6 +115,7 @@ class DeploymentMonitor:
         phase = self._phase_map[name]
         phase.status = status
         phase.end_time = time.monotonic()
+        set_log_indent(0)
         sym = status.symbol
         log.info(
             "%s Phase '%s' %s (%s)", sym, name, status.value, phase.duration_str
@@ -129,7 +134,9 @@ class DeploymentMonitor:
         step = self._find_step(phase_name, step_name)
         step.status = Status.RUNNING
         step.start_time = time.monotonic()
-        log.info("  ▸ %s", step.description or step_name)
+        set_log_indent(1)
+        log.info("▸ %s", step.description or step_name)
+        set_log_indent(2)
         return step
 
     def end_step(
@@ -143,20 +150,21 @@ class DeploymentMonitor:
         step.status = status
         step.end_time = time.monotonic()
         step.error = error
+        set_log_indent(1)
         if status == Status.FAILED:
             log.error(
-                "  %s %s — FAILED (%s)",
+                "%s %s — FAILED (%s)",
                 status.symbol,
                 step_name,
                 step.duration_str,
             )
             if error:
+                set_log_indent(2)
                 for line in error.splitlines()[:5]:
-                    log.error("    %s", line)
+                    log.error("%s", line)
+                set_log_indent(1)
         else:
-            log.debug(
-                "  %s %s (%s)", status.symbol, step_name, step.duration_str
-            )
+            log.debug("%s %s (%s)", status.symbol, step_name, step.duration_str)
 
     def run_step(
         self,
@@ -182,7 +190,7 @@ class DeploymentMonitor:
         lines = [
             "",
             "╔══════════════════════════════════════════════════════╗",
-            "║            Sunbeam Deployment Summary                ║",
+            "║              Sunbeam Deployment Summary              ║",
             "╚══════════════════════════════════════════════════════╝",
             f"  Total time: {time_str}",
             "",
