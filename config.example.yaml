@@ -99,6 +99,10 @@ terraform:
   # 0 = no retry, N = retry up to N times (default: 1).
   bootstrap_retries: 1
 
+  # How long Terraform waits for each LXD/MAAS VM to reach Running state
+  # before failing (e.g. "3m", "5m", "10m"). Passed as -var to bootstrap.sh.
+  vm_boot_timeout: 15m
+
 # Logging
 logging:
   log_dir: ./logs

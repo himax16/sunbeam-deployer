@@ -37,6 +37,7 @@ DEPLOY_MODE="${DEPLOY_MODE:-manual}"
 TF_EXTRA_ARGS="${TF_EXTRA_ARGS:-}"
 SKIP_BOOTSTRAP="${SKIP_BOOTSTRAP:-false}"
 BOOTSTRAP_RETRIES="${BOOTSTRAP_RETRIES:-1}"
+VM_BOOT_TIMEOUT="${VM_BOOT_TIMEOUT:-5m}"
 
 # ==============================================================================
 # Helpers
@@ -148,7 +149,8 @@ else
     if [ -f "$BOOTSTRAP_SCRIPT" ]; then
         chmod +x "$BOOTSTRAP_SCRIPT"
 
-        # Build bootstrap command line
+        # Build bootstrap command line. VM_BOOT_TIMEOUT is passed through
+        # to the Terraform module via -var to control LXD/MAAS VM start timeout.
         BOOTSTRAP_CMD="$BOOTSTRAP_SCRIPT"
         if [ "$DEPLOY_MODE" = "maas" ]; then
             BOOTSTRAP_CMD="$BOOTSTRAP_CMD --maas"
@@ -156,13 +158,17 @@ else
         for arg in $TF_EXTRA_ARGS; do
             BOOTSTRAP_CMD="$BOOTSTRAP_CMD $arg"
         done
+        # Append vm_boot_timeout as a terraform variable override
+        BOOTSTRAP_CMD="$BOOTSTRAP_CMD -var vm_boot_timeout=$VM_BOOT_TIMEOUT"
 
         info "Executing: $BOOTSTRAP_CMD"
 
-        # Terraform's LXD provider has a hardcoded 3-minute VM boot timeout.
-        # On slower hardware, VMs can take longer to start.  Retry up to
-        # BOOTSTRAP_RETRIES times: terraform apply is idempotent — it picks
-        # up where it left off and VMs that already started are re-detected.
+        # Terraform's LXD provider has a default 10-minute VM boot timeout,
+        # but module timeouts can be set via the vm_boot_timeout variable.
+        # For legacy repos without the variable, --tf-arg can be used.
+        # Retry up to BOOTSTRAP_RETRIES times: terraform apply is idempotent —
+        # it picks up where it left off and VMs that already started are
+        # re-detected.
         BOOTSTRAP_RC=0
         ATTEMPT=0
         MAX_ATTEMPTS=$((BOOTSTRAP_RETRIES + 1))
@@ -178,6 +184,19 @@ else
 
             if [ "$ATTEMPT" -lt "$MAX_ATTEMPTS" ]; then
                 warn "Bootstrap exited with code $BOOTSTRAP_RC — retrying (attempt $ATTEMPT/$MAX_ATTEMPTS)…"
+                # Un-taint any lxd_instance resources that Terraform marked as
+                # tainted on failure so they aren't destroyed and recreated.
+                # VMs that are still "Running (initializing)" will finish
+                # starting and be re-detected on the next apply.
+                plan_dir="$REPO_DIR/manual-infra"
+                if [ "$DEPLOY_MODE" = "maas" ]; then
+                    plan_dir="$REPO_DIR/maas-infra"
+                fi
+                if [ -d "$plan_dir/.terraform" ]; then
+                    for tainted in $(cd "$plan_dir" && terraform state list 2>/dev/null | grep 'lxd_instance.compute\|maas_vm_host_machine.compute'); do
+                        (cd "$plan_dir" && terraform untaint "$tainted" 2>/dev/null) || true
+                    done
+                fi
                 set +e
             else
                 err "Bootstrap failed after $MAX_ATTEMPTS attempts (exit code $BOOTSTRAP_RC)"

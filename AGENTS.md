@@ -194,6 +194,21 @@ Edit these with extra caution — bugs here caused real deployment failures:
 
 Phases run in order: `testflinger` (~5-30 min) → `host-setup` (~5 min) → `vm-deploy` (~5 min) → `cluster` (~1.5 hr). Total: ~1.5-2 hours for 3 nodes.
 
+VM creation during `host-setup` uses the Terraform LXD/MAAS providers. The per-VM
+boot timeout is controlled by `terraform.vm_boot_timeout` (default `15m`).
+The `terraform.bootstrap_retries` setting (default `1`) automatically retries
+failed `terraform apply` calls — Terraform is idempotent, so the second attempt
+finishes quickly because already-started VMs are re-detected.
+
+**LXD provider timeout quirk**: The `timeouts { create }` attribute on
+`lxd_instance` *is* parsed by `Create()` and a context timeout is set, but
+`startInstance()` eventually calls the shared `waitForState()` helper which
+has a **hardcoded 3-minute timeout**: `Timeout: 3 * time.Minute`. This means
+no matter what you set in `create`, each VM start attempt always fails after
+exactly 3 minutes if the VM hasn't fully left `Running (initializing)`.
+The retry+untaint mechanism in `host-setup.sh` works around this — the second
+apply finds the VMs already running and passes immediately.
+
 ### Monitoring
 
 ```bash

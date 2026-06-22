@@ -34,6 +34,7 @@
 [Testflinger](https://canonical-testflinger.readthedocs-hosted.com/latest/).
 
 The deployment process:
+
 1. **Provisions a machine** via Testflinger (or connects to an existing one)
 2. **Creates LXD virtual machines** on that machine using Terraform
 3. **Installs the OpenStack snap** in each VM and prepares them for clustering
@@ -43,7 +44,7 @@ The deployment process:
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  Agent Machine (where sunbeam-deployer runs)                │
+│  Agent Machine (where sunbeam-deployer runs)                 │
 │                                                              │
 │  sunbeam-deployer CLI                                        │
 │       │                                                      │
@@ -53,14 +54,14 @@ The deployment process:
 │                                                         │    │
 │  ┌──────────────────────────────────────────────────────▼──┐ │
 │  │  Testflinger Machine (remote, bare metal)               │ │
-│  │                                                          │ │
-│  │  LXD host                                                │ │
-│  │  ├── Terraform (creates VMs + networks)                  │ │
+│  │                                                         │ │
+│  │  LXD host                                               │ │
+│  │  ├── Terraform (creates VMs + networks)                 │ │
 │  │  ├── bm0 (LXD VM) ── bootstrap node                     │ │
 │  │  ├── bm1 (LXD VM) ── join node                          │ │
 │  │  ├── bm2 (LXD VM) ── join node                          │ │
 │  │  └── dns (LXD container) ── dnsmasq                     │ │
-│  └──────────────────────────────────────────────────────────┘ │
+│  └─────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -221,12 +222,26 @@ concurrency:
 terraform:
   extra_args: []            # Extra args passed to bootstrap.sh
   bootstrap_retries: 1      # Auto-retry on VM boot timeout (0 = no retry)
+  vm_boot_timeout: 15m       # Per-VM boot timeout (LXD/MAAS provider)
 ```
 
-The LXD provider in the Terraform module has a hardcoded 3-minute VM boot
-timeout. On slower hardware, VMs may take longer to start. `bootstrap_retries`
-automatically retries failed `terraform apply` calls — Terraform is idempotent,
-so the second attempt picks up where the first left off.
+The LXD and MAAS Terraform providers wait for each VM to reach `Running`
+state during creation. `vm_boot_timeout` controls how long the provider
+waits before failing. Default is `15m`; increase for slower hardware.
+
+**Important**: The `timeouts { create }` attribute on `lxd_instance` *is*
+parsed by the LXD provider's `Create()` method, which wraps the context
+with the configured timeout. However, `startInstance()` eventually calls
+the shared `waitForState()` helper which has a **hardcoded 3-minute
+timeout**: `Timeout: 3 * time.Minute`. This means every VM start attempt
+always fails after exactly 3 minutes if the VM hasn't fully left
+`Running (initializing)` state, regardless of the configured value.
+
+`bootstrap_retries` handles this by automatically retrying failed
+`terraform apply` calls — Terraform is idempotent, so the second attempt
+picks up where the first left off and already-started VMs are re-detected
+immediately. The `host-setup.sh` script also runs `terraform untaint`
+between retries to prevent VM destruction on retry.
 
 ### CLI Overrides
 
@@ -337,6 +352,7 @@ The deployer shows colored, phase-tagged output:
 ```
 
 Each line includes:
+
 - **Timestamp** (HH:MM:SS)
 - **Phase/step prefix** in brackets
 - **Status symbols**: ✅ success, ❌ failed, ⏳ pending, 🔄 running, ⏭️ skipped
@@ -350,12 +366,14 @@ Full debug logs are written to:
 ```
 
 The log file includes:
+
 - Every command executed (with full arguments)
-- Every line of command output (prefixed with `  | `)
+- Every line of command output (prefixed with ` | `)
 - Timing information for all operations
 - SSH connection details (secrets redacted)
 
 **To read the log file**:
+
 ```bash
 # Follow in real-time
 tail -f logs/sunbeam-deploy-*.log
@@ -444,6 +462,7 @@ testflinger cancel <JOB_UUID>
 **Purpose**: Provision a machine or connect to an existing one.
 
 **Steps**:
+
 1. **submit-job**: Submit a Testflinger job YAML (or attach to existing)
 2. **wait-provision**: Poll until the job reaches `reserve` state
 3. **ssh-connect**: Verify SSH connectivity and configure the executor
@@ -452,12 +471,15 @@ testflinger cancel <JOB_UUID>
 **Outputs**: SSH connection to the provisioned machine
 
 **Testflinger Job Phases** (in order):
+
 ```
 setup → provision → firmware_update → test → allocate → reserve → cleanup
 ```
+
 The tool waits for `reserve` (or `test`) before proceeding.
 
 **Key Details**:
+
 - `testflinger submit --quiet <file>` returns just the job UUID
 - `testflinger status <id>` returns the current phase name
 - `testflinger results <id>` returns JSON with `device_info.device_ip`
@@ -472,6 +494,7 @@ also be run independently on any Ubuntu machine. The Python tool pipes the scrip
 SSH with environment variables from configuration.
 
 **Steps** (inside `host-setup.sh`):
+
 1. **Install LXD** snap (idempotent)
 2. **Initialize LXD** with `lxd init --auto` (idempotent)
 3. **Install Terraform** snap — classic confinement (idempotent)
@@ -482,11 +505,13 @@ After the script completes, Python re-runs `_parse_terraform_outputs()` to read
 `terraform output -json compute_nodes` and `network_topology`.
 
 **Outputs**: `InfraInfo` containing:
+
 - List of `ComputeNode` objects (name, fqdn, hostname, ip, roles, osd_devices)
 - Paths to manifest.yaml, ssh_private_key, plan directory
 - Management domain name
 
 **Key Details**:
+
 - VMs are named `bm0`, `bm1`, `bm2`, ... with FQDNs `bm0.res`, `bm1.res`, etc.
 - Management network: `192.167.98.0/24`, VMs start at `.10`
 - A DNS container (dnsmasq) provides name resolution within the LXD network
@@ -497,6 +522,7 @@ After the script completes, Python re-runs `_parse_terraform_outputs()` to read
 **Purpose**: Install the OpenStack snap and prepare each VM for Sunbeam.
 
 **Per-VM Steps** (runs in parallel, max `concurrency.vm_deploy` at a time):
+
 1. **wait-ready**: Wait for LXD agent + cloud-init to complete
 2. **install-snap**: Install `openstack` snap (from store or local file)
 3. **alias**: Set up `sunbeam` snap alias
@@ -505,6 +531,7 @@ After the script completes, Python re-runs `_parse_terraform_outputs()` to read
 6. **manifest**: Push `manifest.yaml` from Terraform output into the VM
 
 **Key Details**:
+
 - Snap install is idempotent — checks `snap list openstack` first
 - `newgrp snap_daemon` is NOT called in automation; fresh `lxc exec` sessions
   inherit the group from the login shell
@@ -516,6 +543,7 @@ After the script completes, Python re-runs `_parse_terraform_outputs()` to read
 selected by `cluster_node_count` participate (default: all).
 
 **Steps**:
+
 1. **Resolve cluster nodes**: Select the first *N* VMs (or all when count is 0)
 2. **dns-validation**: Verify every cluster node can `getent hosts` every other
    cluster node's FQDN (skipped for single-node clusters)
@@ -525,6 +553,7 @@ selected by `cluster_node_count` participate (default: all).
 6. ... (one join step per additional cluster node)
 
 **Key Details**:
+
 - **Token generation**: `sunbeam cluster add --format yaml <FQDN>` — `<FQDN>` is positional
 - **Token extraction**: Parses YAML `token:` field or falls back to bare base64 regex
 - **Join command**: `sunbeam -v cluster join --role <roles> <TOKEN>` — `<TOKEN>` is positional
@@ -542,6 +571,7 @@ selected by `cluster_node_count` participate (default: all).
 ### General Approach
 
 1. **Read the log file** — it contains every command and output:
+
    ```bash
    LOG=$(ls -t logs/sunbeam-deploy-*.log | head -1)
    grep "FAILED\|ERROR\|error\|failed" "$LOG" | tail -20
@@ -550,11 +580,13 @@ selected by `cluster_node_count` participate (default: all).
 2. **Check the summary** — identify which phase/step failed
 
 3. **Re-run the failed phase** using `--phase <name>`:
+
    ```bash
    uv run sunbeam-deployer --device-ip <IP> --phase <failed-phase>
    ```
 
 4. **Check Sunbeam logs inside the VM** (for cluster phase failures):
+
    ```bash
    # SSH to the Testflinger machine
    ssh ubuntu@<device-ip>
@@ -791,9 +823,11 @@ reserve_data:
 
 - **Submitted jobs** (via `--testflinger` or `--tf-job-file`): After a successful
   deployment, the tool prompts interactively:
+
   ```
   Cancel Testflinger job <UUID> and release the machine? [y/N]
   ```
+
   Default is **No** — the machine stays alive for inspection or further work.
 - **Attached jobs** (via `--tf-job-id`): No prompt. The tool logs the job ID and
   how to cancel manually (`testflinger cancel <UUID>`).
@@ -841,6 +875,7 @@ When running a single phase (e.g. `--phase cluster`), the tool reconstructs
 The tool reads these Terraform outputs as its source of truth:
 
 **`compute_nodes`** (JSON array):
+
 ```json
 [
   {
@@ -856,6 +891,7 @@ The tool reads these Terraform outputs as its source of truth:
 ```
 
 **`network_topology`** (JSON object):
+
 ```json
 {
   "management": {
@@ -869,6 +905,7 @@ The tool reads these Terraform outputs as its source of truth:
 ### Secret Redaction
 
 The logger automatically redacts sensitive patterns from both file and terminal logs:
+
 - `token: <value>` → `token: <REDACTED>`
 - SSH private keys → `<REDACTED>`
 - `apikey: <value>` → `apikey: <REDACTED>`

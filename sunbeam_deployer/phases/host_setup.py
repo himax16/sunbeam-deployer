@@ -88,7 +88,8 @@ def _run_host_setup_script(cfg: DeployConfig, mon: DeploymentMonitor) -> None:
             f"REPO_DIR={cfg.repo_dir} "
             f"DEPLOY_MODE={shlex.quote(cfg.deploy_mode)} "
             f"TF_EXTRA_ARGS={shlex.quote(' '.join(cfg.terraform.extra_args))} "
-            f"BOOTSTRAP_RETRIES={cfg.terraform.bootstrap_retries}"
+            f"BOOTSTRAP_RETRIES={cfg.terraform.bootstrap_retries} "
+            f"VM_BOOT_TIMEOUT={shlex.quote(cfg.terraform.vm_boot_timeout)}"
         )
 
         # Pipe the script to bash on the remote host.

@@ -49,6 +49,7 @@ _DEFAULTS: dict[str, Any] = {
     "terraform": {
         "extra_args": [],
         "bootstrap_retries": 1,
+        "vm_boot_timeout": "15m",
     },
     "logging": {
         "log_dir": "./logs",
@@ -146,6 +147,7 @@ class SunbeamConfig:
 class TerraformConfig:
     extra_args: list[str]
     bootstrap_retries: int
+    vm_boot_timeout: str
 
 
 @dataclass
