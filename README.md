@@ -40,6 +40,22 @@ The deployer runs four phases sequentially:
 
 ### Phase 1: Host Setup
 
+Phase 1 delegates to a **standalone bash script** (`scripts/host-setup.sh`) that
+can also be run independently on any Ubuntu machine:
+
+```bash
+# Standalone — run directly on the target machine
+wget -O - https://raw.githubusercontent.com/.../host-setup.sh | bash
+
+# With custom options
+REPO_URL=https://... REPO_BRANCH=dev DEPLOY_MODE=maas bash host-setup.sh
+```
+
+When run via `sunbeam-deployer`, the Python tool pipes the bundled script over
+SSH and exports the appropriate environment variables from configuration.
+
+The script does the following:
+
 - Installs **LXD** and **Terraform** snaps (if not present)
 - Clones the [sunbeam-proxified-dev](https://github.com/himax16/sunbeam-proxified-dev) repo
 - Runs `bootstrap.sh` which:
@@ -47,7 +63,9 @@ The deployer runs four phases sequentially:
   - Creates LXD networks (management + compute bridges)
   - Creates LXD VMs (`bm0`, `bm1`, …) via Terraform
   - Generates `manifest.yaml` and `testbed.yaml`
-- Parses Terraform outputs (`compute_nodes`, `network_topology`) for VM metadata
+
+After the script completes, Python parses Terraform outputs (`compute_nodes`,
+`network_topology`) for VM metadata.
 
 ### Phase 2: VM Deployment
 
@@ -68,34 +86,81 @@ For each VM (bounded parallelism, default 2):
 
 ## CLI Usage
 
+The CLI has two subcommands: `deploy` (the default) and `list-jobs`.
+
+### `deploy` — Run a Sunbeam deployment
+
 ```bash
-sunbeam-deployer [-c CONFIG] [-v] [--phase PHASE] [options]
+sunbeam-deployer deploy [-c CONFIG] [-v] [--phase PHASE] [options]
+```
 
-Phases:
-  --phase all           Run all phases (default)
-  --phase testflinger   Only provision via Testflinger
-  --phase host-setup    Only run infrastructure setup
-  --phase vm-deploy     Only deploy snaps into VMs
-  --phase cluster       Only bootstrap/join the cluster
+When no subcommand is given, `deploy` is implied for backward compatibility:
 
-Testflinger options:
-  --testflinger         Enable Testflinger provisioning
-  --tf-job-id JOB_ID    Attach to an existing job
-  --tf-job-file FILE    Submit a specific job YAML
-  --tf-ssh-key PATH     SSH key for the Testflinger machine
-  --device-ip IP        Skip Testflinger, connect directly via SSH
+```bash
+# These are equivalent:
+uv run sunbeam-deployer --device-ip 10.241.5.22
+uv run sunbeam-deployer deploy --device-ip 10.241.5.22
+```
 
-General options:
-  -c, --config FILE       Path to YAML config file
-  -v, --verbose           Enable DEBUG-level terminal output
-  --snap-channel CHANNEL  Override snap channel (e.g. 2024.1/edge)
-  --snap-revision REV     Pin to a specific snap revision
-  --snap-file PATH        Install from a local .snap file
-  --deploy-mode MODE      Override deploy mode: manual or maas
-  --repo-dir DIR          Override the repo clone directory
-  --accept-defaults       Pass --accept-defaults to sunbeam bootstrap
-  --no-manifest           Skip pushing manifest.yaml to VMs
-  --tf-arg ARG            Extra arg for terraform apply (repeatable)
+**Phases:**
+
+| Flag | Description |
+| ---- | ----------- |
+| `--phase all` | Run all phases (default) |
+| `--phase testflinger` | Only provision via Testflinger |
+| `--phase host-setup` | Only run infrastructure setup |
+| `--phase vm-deploy` | Only deploy snaps into VMs |
+| `--phase cluster` | Only bootstrap/join the cluster |
+
+**Testflinger options:**
+
+| Flag | Description |
+| ---- | ----------- |
+| `--testflinger` | Enable Testflinger provisioning |
+| `--tf-job-id JOB_ID` | Attach to an existing job |
+| `--tf-job-file FILE` | Submit a specific job YAML |
+| `--tf-ssh-key PATH` | SSH key for the Testflinger machine |
+| `--device-ip IP` | Skip Testflinger, connect directly via SSH |
+
+**General options:**
+
+| Flag | Description |
+| ---- | ----------- |
+| `-c, --config FILE` | Path to YAML config file |
+| `-v, --verbose` | Enable DEBUG-level terminal output |
+| `--snap-channel CHANNEL` | Override snap channel (e.g. `2024.1/edge`) |
+| `--snap-revision REV` | Pin to a specific snap revision |
+| `--snap-file PATH` | Install from a local `.snap` file |
+| `--deploy-mode MODE` | Override deploy mode: `manual` or `maas` |
+| `--repo-dir DIR` | Override the repo clone directory |
+| `--accept-defaults` | Pass `--accept-defaults` to sunbeam bootstrap |
+| `--no-manifest` | Skip pushing `manifest.yaml` to VMs |
+| `--tf-arg ARG` | Extra arg for terraform apply (repeatable) |
+| `--cancel-on-failure` | Cancel Testflinger job on deployment failure |
+
+### `list-jobs` — List Testflinger jobs
+
+```bash
+sunbeam-deployer list-jobs [-v] [-a] [-f table|json]
+```
+
+| Flag | Description |
+| ---- | ----------- |
+| `-a, --all` | Show all jobs (including waiting/completed); by default only active/reserve jobs |
+| `-f, --format` | Output format: `table` (default) or `json` |
+| `-v, --verbose` | Enable verbose (DEBUG) output |
+
+**Examples:**
+
+```bash
+# Show only active/reserve jobs
+uv run sunbeam-deployer list-jobs
+
+# Show all jobs including waiting and completed
+uv run sunbeam-deployer list-jobs --all
+
+# Machine-readable JSON output
+uv run sunbeam-deployer list-jobs --format json
 ```
 
 ### Examples
@@ -165,7 +230,7 @@ Key settings:
 | `testflinger.reserve_timeout` | `259200` | Reservation timeout (3 days) |
 | `deploy_mode` | `manual` | `manual` (LXD-only) or `maas` |
 | `snap.source` | `store` | `store` or `local` |
-| `snap.channel` | `2024.1/edge` | Snap store channel |
+| `snap.channel` | `2026.1/edge` | Snap store channel |
 | `snap.install_method` | `dangerous` | `dangerous` or `try` (for local installs) |
 | `sunbeam.manifest` | `true` | Push Terraform-generated manifest to VMs |
 | `concurrency.vm_deploy` | `2` | Max VMs deployed in parallel |
@@ -243,16 +308,19 @@ uv run ruff format sunbeam_deployer/ tests/         # Auto-format code
 ```text
 sunbeam_deployer/
 ├── __init__.py          # Package metadata
-├── __main__.py          # CLI entry point
+├── __main__.py          # CLI entry point (argparse, dispatch)
+├── commands.py          # Subcommand handlers (list-jobs)
 ├── config.py            # Configuration loading + validation
 ├── executor.py          # Command execution (host + LXD VMs)
 ├── logger.py            # Dual file/terminal logging with secret redaction
 ├── monitor.py           # Phase/step status tracking + summary
-└── phases/
-    ├── testflinger.py   # Phase 0: Testflinger job submission + SSH setup
-    ├── host_setup.py    # Phase 1: LXD + Terraform infrastructure
-    ├── vm_deploy.py     # Phase 2: Snap install + node preparation
-    └── cluster.py       # Phase 3: Bootstrap + join
+├── phases/
+│   ├── testflinger.py   # Phase 0: Testflinger job submission + SSH setup
+│   ├── host_setup.py    # Phase 1: LXD + Terraform infrastructure
+│   ├── vm_deploy.py     # Phase 2: Snap install + node preparation
+│   └── cluster.py       # Phase 3: Bootstrap + join
+└── scripts/
+    └── host-setup.sh    # Standalone bash script for Phase 1
 ```
 
 ## Prerequisites

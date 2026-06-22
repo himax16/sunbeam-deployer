@@ -48,6 +48,7 @@ _DEFAULTS: dict[str, Any] = {
     },
     "terraform": {
         "extra_args": [],
+        "bootstrap_retries": 1,
     },
     "logging": {
         "log_dir": "./logs",
@@ -144,6 +145,7 @@ class SunbeamConfig:
 @dataclass
 class TerraformConfig:
     extra_args: list[str]
+    bootstrap_retries: int
 
 
 @dataclass

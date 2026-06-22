@@ -94,6 +94,11 @@ terraform:
   # Example: ["-var-file", "custom.tfvars"]
   extra_args: []
 
+  # Number of automatic retries when Terraform apply fails due to VM boot
+  # timeouts (LXD provider hardcodes a 3-minute per-VM start timeout).
+  # 0 = no retry, N = retry up to N times (default: 1).
+  bootstrap_retries: 1
+
 # Logging
 logging:
   log_dir: ./logs

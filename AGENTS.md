@@ -58,14 +58,16 @@ This is expensive (requires a provisioned machine). Skip for doc-only or logging
 
 | File | Responsibility |
 |------|---------------|
-| `__main__.py` | CLI entry point, phase orchestration, argparse |
+| `__main__.py` | CLI entry point, argparse, subcommand dispatch (`deploy`, `list-jobs`) |
+| `commands.py` | Subcommand handlers (`list-jobs` — Testflinger job listing) |
 | `config.py` | YAML loading, dataclass definitions, defaults, validation |
 | `executor.py` | All command execution: local, host (SSH-transparent), LXD VM |
 | `monitor.py` | Phase/step status tracking, summary table rendering |
 | `phases/testflinger.py` | Phase 0: submit/attach TF job, poll, SSH setup |
-| `phases/host_setup.py` | Phase 1: LXD, Terraform, clone repo, bootstrap.sh, parse outputs |
+| `phases/host_setup.py` | Phase 1: delegates to `scripts/host-setup.sh`, then parses Terraform outputs |
 | `phases/vm_deploy.py` | Phase 2: per-VM snap install, prepare-node, manifest push (parallel) |
 | `phases/cluster.py` | Phase 3: DNS validation, bootstrap, token-based join |
+| `scripts/host-setup.sh` | Standalone bash script for Phase 1 (LXD, Terraform, repo, bootstrap) |
 
 ### Transparent SSH Routing
 
@@ -120,7 +122,7 @@ Edit these with extra caution — bugs here caused real deployment failures:
 | File / Function | Risk | Reason |
 |----------------|------|--------|
 | `executor.py` — `run_host()`, `_run_via_ssh()` | **High** | All remote execution routes through here. Breaking SSH routing breaks everything. |
-| `host_setup.py` — `_parse_terraform_outputs()` | **High** | Source of truth for VM metadata. Wrong parsing cascades to Phase 2 and 3. |
+| `host_setup.py` — `_run_host_setup_script()`, `_parse_terraform_outputs()` | **High** | `_run_host_setup_script()` pipes the standalone bash script with env vars (REPO_DIR must NOT be quoted for `~` expansion). `_parse_terraform_outputs()` is source of truth for VM metadata. Wrong parsing cascades to Phase 2 and 3. |
 | `cluster.py` — `_extract_token()`, `_join_node()`, `_resolve_cluster_nodes()` | **High** | Token parsing and join syntax are fragile. Positional arg order matters. Node filtering logic determines cluster topology. |
 | `config.py` — `_deep_merge()`, path handling | **Medium** | `~` must stay unexpanded for `repo_dir`. `_deep_merge` must not clobber nested keys. |
 | `vm_deploy.py` — `_push_manifest()` | **Medium** | Must use `run_host("test -f ...")` not `os.path.exists()` for remote checks. |
@@ -158,8 +160,9 @@ Edit these with extra caution — bugs here caused real deployment failures:
 ## Common Pitfalls
 
 1. **`~` expansion**: `os.path.expanduser("~")` returns the LOCAL home, not remote. Use `run_host("test -d ~/dir")`.
-2. **`-chdir=~/path`**: Bash doesn't expand `~` inside flag values. Use `cd ~/path && terraform output`.
-3. **LXD init**: `bootstrap.sh`'s preseed fails on block devices. Always pre-init with `lxd init --auto`.
+2. **`~` in single quotes**: `shlex.quote("~/dir")` produces `'~/dir'` — single quotes block `~` expansion. Pass `REPO_DIR` bare (no quoting) so the remote bash expands it.
+3. **`-chdir=~/path`**: Bash doesn't expand `~` inside flag values. Use `cd ~/path && terraform output`.
+4. **LXD init**: `bootstrap.sh`'s preseed fails on block devices. Always pre-init with `lxd init --auto`.
 4. **Snap idempotency**: `snap install` fails if already installed. Check `snap list openstack` first.
 5. **Local vs remote FS**: `os.path.exists()` checks local FS. Use `run_host("test -f ...")` for remote.
 6. **`newgrp snap_daemon`**: Cannot run in automation (starts subshell). Fresh `lxc exec` sessions inherit the group.
@@ -186,6 +189,8 @@ Edit these with extra caution — bugs here caused real deployment failures:
 | Re-run single phase | `uv run sunbeam-deployer --device-ip <IP> --phase <phase>` |
 | Verbose output | Add `-v` to any command |
 | Auto-cancel TF job on failure | Add `--cancel-on-failure` |
+| List active TF jobs | `uv run sunbeam-deployer list-jobs` |
+| List all TF jobs (JSON) | `uv run sunbeam-deployer list-jobs --all --format json` |
 
 Phases run in order: `testflinger` (~5-30 min) → `host-setup` (~5 min) → `vm-deploy` (~5 min) → `cluster` (~1.5 hr). Total: ~1.5-2 hours for 3 nodes.
 

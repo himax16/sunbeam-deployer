@@ -110,16 +110,19 @@ testflinger --help
 ```
 sunbeam-deploy-bot/          # Project root
 ├── sunbeam_deployer/        # Python package
-│   ├── __main__.py          # CLI entry point
+│   ├── __main__.py          # CLI entry point (argparse, subcommand dispatch)
+│   ├── commands.py          # Subcommand handlers (list-jobs)
 │   ├── config.py            # Config loading
 │   ├── executor.py          # Command execution engine
 │   ├── logger.py            # Dual logging system
 │   ├── monitor.py           # Progress tracking
-│   └── phases/              # Deployment phases
-│       ├── testflinger.py   # Phase 0
-│       ├── host_setup.py    # Phase 1
-│       ├── vm_deploy.py     # Phase 2
-│       └── cluster.py       # Phase 3
+│   ├── phases/              # Deployment phases
+│   │   ├── testflinger.py   # Phase 0
+│   │   ├── host_setup.py    # Phase 1
+│   │   ├── vm_deploy.py     # Phase 2
+│   │   └── cluster.py       # Phase 3
+│   └── scripts/
+│       └── host-setup.sh    # Standalone bash script for Phase 1
 ├── config.example.yaml      # Reference configuration
 ├── pyproject.toml            # Project metadata
 └── logs/                    # Log files (created at runtime)
@@ -212,6 +215,19 @@ concurrency:
   vm_deploy: 2    # Max VMs deployed in parallel
 ```
 
+#### 3.6 Terraform Settings
+
+```yaml
+terraform:
+  extra_args: []            # Extra args passed to bootstrap.sh
+  bootstrap_retries: 1      # Auto-retry on VM boot timeout (0 = no retry)
+```
+
+The LXD provider in the Terraform module has a hardcoded 3-minute VM boot
+timeout. On slower hardware, VMs may take longer to start. `bootstrap_retries`
+automatically retries failed `terraform apply` calls — Terraform is idempotent,
+so the second attempt picks up where the first left off.
+
 ### CLI Overrides
 
 All key settings can be overridden via CLI flags (see [CLI Reference](#13-complete-cli-reference)).
@@ -221,12 +237,17 @@ CLI flags always take priority over config file values.
 
 ## 4. Running a Deployment
 
+The CLI has two subcommands: `deploy` (the default) and `list-jobs`. When no
+subcommand is given, `deploy` is implied for backward compatibility.
+
 ### Deployment Modes
 
 #### Mode 1: Full Deployment with New Testflinger Job
 
 ```bash
 uv run sunbeam-deployer --testflinger -c config.yaml
+# equivalent:
+uv run sunbeam-deployer deploy --testflinger -c config.yaml
 ```
 
 This submits a new Testflinger job, waits for provisioning, then runs all phases.
@@ -254,6 +275,19 @@ uv run sunbeam-deployer
 ```
 
 Runs all host commands locally. The machine running the tool IS the deployment target.
+
+### list-jobs — List Testflinger Jobs
+
+```bash
+# Show only active/reserve jobs (default)
+uv run sunbeam-deployer list-jobs
+
+# Show all jobs including waiting/completed
+uv run sunbeam-deployer list-jobs --all
+
+# Machine-readable JSON output
+uv run sunbeam-deployer list-jobs --all --format json
+```
 
 ### Running Individual Phases
 
@@ -433,12 +467,19 @@ The tool waits for `reserve` (or `test`) before proceeding.
 
 **Purpose**: Install infrastructure tooling and create LXD VMs.
 
-**Steps**:
-1. **install-lxd**: Install LXD snap, initialize with `lxd init --auto`
-2. **install-terraform**: Install Terraform snap (classic confinement)
-3. **clone-repo**: Clone `himax16/sunbeam-proxified-dev` repository
-4. **bootstrap**: Run `bootstrap.sh` (Terraform init/apply, creates VMs + networks)
-5. **parse-outputs**: Parse `terraform output -json compute_nodes` and `network_topology`
+Phase 1 delegates to a **standalone bash script** (`scripts/host-setup.sh`) that can
+also be run independently on any Ubuntu machine. The Python tool pipes the script over
+SSH with environment variables from configuration.
+
+**Steps** (inside `host-setup.sh`):
+1. **Install LXD** snap (idempotent)
+2. **Initialize LXD** with `lxd init --auto` (idempotent)
+3. **Install Terraform** snap — classic confinement (idempotent)
+4. **Clone/pull repo** — `himax16/sunbeam-proxified-dev` (idempotent)
+5. **Run bootstrap.sh** — Terraform init/apply, creates VMs + networks
+
+After the script completes, Python re-runs `_parse_terraform_outputs()` to read
+`terraform output -json compute_nodes` and `network_topology`.
 
 **Outputs**: `InfraInfo` containing:
 - List of `ComputeNode` objects (name, fqdn, hostname, ip, roles, osd_devices)
@@ -589,6 +630,16 @@ these patterns and apply the documented fixes.
 **Fix**: Never expand `~` locally for remote paths. Keep `~` in strings and let
 the remote bash shell expand it. Use `run_host("test -d ~/somedir")` instead of
 `Path("~/somedir").exists()`.
+
+### 8.1b `shlex.quote` Blocks `~` Expansion
+
+**Pattern**: `shlex.quote("~/dir")` produces `'~/dir'` — single quotes prevent `~`
+from being expanded by bash. The env var reaches the script as the literal string
+`~/dir` including the single quotes.
+
+**Fix**: For values that start with `~`, do NOT wrap with `shlex.quote()`. Pass
+the value bare in the env var assignment so the remote bash expands it:
+`f"REPO_DIR={cfg.repo_dir}"` instead of `f"REPO_DIR={shlex.quote(cfg.repo_dir)}"`.
 
 ### 8.2 Terraform `-chdir=~/path` Fails
 
@@ -862,8 +913,13 @@ Single-node clusters (`cluster_node_count: 1`) skip join steps entirely.
 
 ```
 sunbeam-deployer [-V] [-c FILE] [-v] [--phase PHASE] [flags]
+sunbeam-deployer {deploy,list-jobs} ...
 
-General:
+Subcommands:
+  deploy              Deploy Sunbeam (default if no subcommand given)
+  list-jobs           List Testflinger jobs and their IP addresses
+
+General (deploy):
   -V, --version              Show version and exit
   -c, --config FILE          YAML configuration file
   -v, --verbose              DEBUG-level terminal output
@@ -890,6 +946,11 @@ Deployment:
   --accept-defaults          Pass --accept-defaults to sunbeam bootstrap
   --no-manifest              Skip pushing manifest.yaml to VMs
   --tf-arg ARG               Extra terraform arg (repeatable)
+
+list-jobs:
+  -v, --verbose              Enable verbose output
+  -a, --all                  Show all jobs (default: active/reserve only)
+  -f, --format FORMAT        Output format: table (default) or json
 ```
 
 ### Exit Codes

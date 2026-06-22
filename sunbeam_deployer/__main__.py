@@ -34,6 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(
         dest="command",
         help="Available commands",
+        required=False,
     )
 
     # deploy command (default behavior, no subcommand required)
@@ -279,8 +280,9 @@ def main(argv: list[str] | None = None) -> int:
             output_format=args.format,
         )
 
-    # Print help if command is None or not recognized
-    if not args.command or args.command not in ("deploy",):
+    # Print help if command is explicitly set to something unrecognized.
+    # None (no subcommand) defaults to "deploy" for backward compatibility.
+    if args.command and args.command not in ("deploy",):
         parser.print_help()
         return 1
 

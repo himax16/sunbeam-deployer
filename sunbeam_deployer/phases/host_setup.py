@@ -1,10 +1,16 @@
-"""Phase 1 — Host setup: LXD, Terraform, bootstrap."""
+"""Phase 1 — Host setup: LXD, Terraform, bootstrap.
+
+Delegates to a standalone bash script (``scripts/host-setup.sh``) that can
+also be run independently on any Ubuntu machine.
+"""
 
 from __future__ import annotations
 
 import json
 import logging
+import shlex
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from sunbeam_deployer.config import DeployConfig
 from sunbeam_deployer.executor import run_host
@@ -13,6 +19,11 @@ from sunbeam_deployer.monitor import DeploymentMonitor, Status
 log = logging.getLogger("sunbeam_deployer.phases.host_setup")
 
 PHASE = "host-setup"
+
+# Path to the bundled standalone bash script
+_SCRIPT_PATH = (
+    Path(__file__).resolve().parent.parent / "scripts" / "host-setup.sh"
+)
 
 
 @dataclass
@@ -44,10 +55,7 @@ def run_phase(cfg: DeployConfig, mon: DeploymentMonitor) -> InfraInfo:
     mon.start_phase(PHASE)
 
     try:
-        _install_lxd(cfg, mon)
-        _install_terraform(cfg, mon)
-        _clone_repo(cfg, mon)
-        _run_bootstrap(cfg, mon)
+        _run_host_setup_script(cfg, mon)
         info = _parse_terraform_outputs(cfg, mon)
         mon.end_phase(PHASE, Status.SUCCESS)
         return info
@@ -61,78 +69,37 @@ def run_phase(cfg: DeployConfig, mon: DeploymentMonitor) -> InfraInfo:
 # ---------------------------------------------------------------------------
 
 
-def _install_lxd(cfg: DeployConfig, mon: DeploymentMonitor) -> None:
-    with mon.run_step(PHASE, "install-lxd", "Install and initialise LXD"):
-        result = run_host("which lxc", stream=False)
-        if not result.ok:
-            run_host(
-                "sudo snap install lxd",
-                check=True,
-                timeout=cfg.timeouts.snap_install,
-            )
-        else:
-            log.info("LXD already installed")
-
-        # Ensure LXD is initialised — bootstrap.sh's dir-driver preseed
-        # fails on block devices, so pre-init with --auto to create the
-        # default storage pool.  bootstrap.sh detects this and skips init.
-        init_check = run_host("lxc storage show default", stream=False)
-        if init_check.ok:
-            log.info("LXD already initialised")
-        else:
-            log.info("Initialising LXD with --auto")
-            run_host("lxd init --auto", check=True, timeout=60)
-
-
-def _install_terraform(cfg: DeployConfig, mon: DeploymentMonitor) -> None:
-    with mon.run_step(PHASE, "install-terraform", "Install Terraform snap"):
-        result = run_host("which terraform", stream=False)
-        if result.ok:
-            log.info("Terraform already installed")
-            return
-        run_host(
-            "sudo snap install terraform --classic",
-            check=True,
-            timeout=cfg.timeouts.snap_install,
-        )
-
-
-def _clone_repo(cfg: DeployConfig, mon: DeploymentMonitor) -> None:
-    with mon.run_step(PHASE, "clone-repo", "Clone infrastructure repository"):
-        repo_dir = cfg.repo_dir
-
-        # Check if repo is already cloned on the target (local or remote)
-        result = run_host(f"test -d {repo_dir}/.git", stream=False)
-        if result.ok:
-            log.info("Repo already cloned at %s — pulling latest", repo_dir)
-            run_host(f"git -C {repo_dir} pull --ff-only", stream=True)
-            return
-
-        # Remove stale directory if it exists without .git
-        run_host(f"rm -rf {repo_dir}", stream=False)
-
-        run_host(
-            f"git clone --branch {cfg.repo_branch} {cfg.repo_url} {repo_dir}",
-            check=True,
-        )
-
-
-def _run_bootstrap(cfg: DeployConfig, mon: DeploymentMonitor) -> None:
+def _run_host_setup_script(cfg: DeployConfig, mon: DeploymentMonitor) -> None:
+    """Pipe the bundled host-setup.sh to the deployment host and run it."""
     with mon.run_step(
-        PHASE, "bootstrap", "Run infrastructure bootstrap (Terraform)"
+        PHASE,
+        "host-setup-script",
+        "Run host-setup script (LXD, Terraform, repo, bootstrap)",
     ):
-        repo_dir = cfg.repo_dir
-        bootstrap_script = f"{repo_dir}/bootstrap.sh"
+        script = _SCRIPT_PATH.read_text()
 
-        run_host(f"chmod +x {bootstrap_script}", check=True)
+        # Build environment variables for the script.
+        # NOTE: REPO_DIR is intentionally NOT quoted — it must start with
+        # ~ so the remote bash expands it to the remote $HOME.
+        # All other values are safe to single-quote.
+        env_vars = (
+            f"REPO_URL={shlex.quote(cfg.repo_url)} "
+            f"REPO_BRANCH={shlex.quote(cfg.repo_branch)} "
+            f"REPO_DIR={cfg.repo_dir} "
+            f"DEPLOY_MODE={shlex.quote(cfg.deploy_mode)} "
+            f"TF_EXTRA_ARGS={shlex.quote(' '.join(cfg.terraform.extra_args))} "
+            f"BOOTSTRAP_RETRIES={cfg.terraform.bootstrap_retries}"
+        )
 
-        cmd = bootstrap_script
-        if cfg.deploy_mode == "maas":
-            cmd += " --maas"
-        for arg in cfg.terraform.extra_args:
-            cmd += f" {arg}"
-
-        run_host(cmd, check=True, timeout=cfg.timeouts.terraform_apply)
+        # Pipe the script to bash on the remote host.
+        # env vars are exported before bash reads the script from stdin.
+        wrapped = f"export {env_vars} && bash -s"
+        run_host(
+            wrapped,
+            input_text=script,
+            check=True,
+            timeout=cfg.timeouts.terraform_apply,
+        )
 
 
 def _parse_terraform_outputs(
