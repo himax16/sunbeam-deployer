@@ -68,7 +68,7 @@ For each VM (bounded parallelism, default 2):
 
 ## CLI Usage
 
-```
+```bash
 sunbeam-deployer [-c CONFIG] [-v] [--phase PHASE] [options]
 
 Phases:
@@ -158,7 +158,7 @@ reference with comments.
 Key settings:
 
 | Setting | Default | Description |
-|---------|---------|-------------|
+| --- | --- | --- |
 | `testflinger.enabled` | `false` | Enable Testflinger provisioning |
 | `testflinger.queue` | `openstack` | Testflinger queue name |
 | `testflinger.distro` | `noble` | OS distro for provisioning |
@@ -206,7 +206,8 @@ Development dependencies (pytest, ruff, tox) are **dev-only** — they are not
 installed for production use. Install them with:
 
 ```bash
-uv sync                              # Installs runtime + dev deps
+# Installs runtime + dev deps
+uv sync
 ```
 
 ### Running Checks with tox
@@ -215,7 +216,7 @@ uv sync                              # Installs runtime + dev deps
 Configuration lives in [`tox.ini`](tox.ini).
 
 | Command | Description |
-|---------|-------------|
+| --- | --- |
 | `uv run tox` | Run **all** environments (unit + lint) |
 | `uv run tox -e unit` | Run unit tests only |
 | `uv run tox -e lint` | Run ruff linter + formatter check only |
@@ -233,13 +234,13 @@ Configuration lives in [`tox.ini`](tox.ini).
 #### Fixing Lint Issues
 
 ```bash
-uv run ruff check --fix sunbeam_deployer/ tests/   # Auto-fix lint errors
+uv run ruff check --fix sunbeam_deployer/ tests/    # Auto-fix lint errors
 uv run ruff format sunbeam_deployer/ tests/         # Auto-format code
 ```
 
 ## Project Structure
 
-```
+```text
 sunbeam_deployer/
 ├── __init__.py          # Package metadata
 ├── __main__.py          # CLI entry point
