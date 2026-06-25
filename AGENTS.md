@@ -2,7 +2,7 @@
 
 ## Overview
 
-Automated deployment of [Canonical Sunbeam](https://microstack.run/) (OpenStack) on [Testflinger](https://canonical-testflinger.readthedocs-hosted.com/latest/) bare-metal machines. Python CLI managed by [uv](https://docs.astral.sh/uv/) + [hatchling](https://hatch.pypa.io/). Only runtime dependency is `pyyaml`.
+Automated deployment of [Canonical Sunbeam](https://microstack.run/) (OpenStack) on [Testflinger](https://canonical-testflinger.readthedocs-hosted.com/latest/) bare-metal machines. Python CLI built with [click](https://click.palletsprojects.com/) + [rich-click](https://github.com/ewels/rich-click), managed by [uv](https://docs.astral.sh/uv/) + [hatchling](https://hatch.pypa.io/). Runtime dependencies: `click`, `rich-click`, `pyyaml`.
 
 The deployment process:
 
@@ -72,7 +72,8 @@ Add new dependencies to `pyproject.toml` under `[project] dependencies`, then `u
 ```text
 sunbeam-deployer/             # Project root
 ├── sunbeam_deployer/        # Python package
-│   ├── __main__.py          # CLI entry point (argparse, subcommand dispatch)
+│   ├── __main__.py          # Thin entry point, delegates to cli.py
+│   ├── cli.py               # Click CLI: group, commands, deploy logic
 │   ├── commands.py          # Subcommand handlers (list-jobs)
 │   ├── config.py            # Config loading
 │   ├── executor.py          # Command execution engine
@@ -108,8 +109,7 @@ uv run tox -e unit -- -k "TestDeepMerge"                                        
 
 **Run when touching executor, phases, or config schema:**
 
-```bash
-uv run sunbeam-deployer --device-ip <IP> --phase host-setup -v   # Smoke test against real machine
+uv run sunbeam-deployer deploy --device-ip <IP> --phase host-setup -v   # Smoke test against real machine
 ```
 
 This is expensive (requires a provisioned machine). Skip for doc-only or logging changes.
@@ -134,8 +134,8 @@ This is expensive (requires a provisioned machine). Skip for doc-only or logging
 
 | File | Responsibility |
 | ------ | --------------- |
-| `__main__.py` | CLI entry point, argparse, subcommand dispatch (`deploy`, `list-jobs`) |
-| `commands.py` | Subcommand handlers (`list-jobs` — Testflinger job listing) |
+| `__main__.py` | Thin entry point, delegates to `cli.py` |
+| `cli.py` | Click group, commands (`deploy`, `list-jobs`), deploy logic, overrides |
 | `config.py` | YAML loading, dataclass definitions, defaults, validation |
 | `executor.py` | All command execution: local, host (SSH-transparent), LXD VM |
 | `monitor.py` | Phase/step status tracking, summary table rendering |
@@ -382,10 +382,10 @@ CLI flags always take priority over config file values (see [CLI Reference](#com
 
 | Task | Command |
 | ------ | --------- |
-| Full deploy (new TF job) | `uv run sunbeam-deployer --testflinger -c config.yaml` |
-| Attach to existing job | `uv run sunbeam-deployer --tf-job-id <UUID>` |
-| Direct SSH deploy | `uv run sunbeam-deployer --device-ip <IP>` |
-| Re-run single phase | `uv run sunbeam-deployer --device-ip <IP> --phase <phase>` |
+| Full deploy (new TF job) | `uv run sunbeam-deployer deploy --testflinger -c config.yaml` |
+| Attach to existing job | `uv run sunbeam-deployer deploy --tf-job-id <UUID>` |
+| Direct SSH deploy | `uv run sunbeam-deployer deploy --device-ip <IP>` |
+| Re-run single phase | `uv run sunbeam-deployer deploy --device-ip <IP> --phase <phase>` |
 | Verbose output | Add `-v` to any command |
 | Auto-cancel TF job on failure | Add `--cancel-on-failure` |
 | List active TF jobs | `uv run sunbeam-deployer list-jobs` |
@@ -397,17 +397,16 @@ Phases run in order: `testflinger` (~5-30 min) → `host-setup` (~5 min) → `vm
 
 | Mode | Command | When |
 | ------ | --------- | ------ |
-| New Testflinger job | `uv run sunbeam-deployer --testflinger -c config.yaml` | Provision fresh machine |
-| Attach to existing job | `uv run sunbeam-deployer --tf-job-id <UUID>` | Job already in reserve state |
-| Direct SSH | `uv run sunbeam-deployer --device-ip 10.241.2.45` | Skip Testflinger entirely |
-| Local machine | `uv run sunbeam-deployer` | Machine running the tool IS the target |
+| New Testflinger job | `uv run sunbeam-deployer deploy --testflinger -c config.yaml` | Provision fresh machine |
+| Attach to existing job | `uv run sunbeam-deployer deploy --tf-job-id <UUID>` | Job already in reserve state |
+| Direct SSH | `uv run sunbeam-deployer deploy --device-ip 10.241.2.45` | Skip Testflinger entirely |
+| Local machine | `uv run sunbeam-deployer deploy` | Machine running the tool IS the target |
 
-### Running Individual Phases
 
 ```bash
-uv run sunbeam-deployer --device-ip 10.241.2.45 --phase host-setup
-uv run sunbeam-deployer --device-ip 10.241.2.45 --phase vm-deploy
-uv run sunbeam-deployer --device-ip 10.241.2.45 --phase cluster
+uv run sunbeam-deployer deploy --device-ip 10.241.2.45 --phase host-setup
+uv run sunbeam-deployer deploy --device-ip 10.241.2.45 --phase vm-deploy
+uv run sunbeam-deployer deploy --device-ip 10.241.2.45 --phase cluster
 ```
 
 When running `--phase vm-deploy` or `--phase cluster`, the tool automatically reconstructs VM metadata from existing Terraform outputs. The infrastructure must already be set up.
@@ -553,10 +552,10 @@ After the script completes, Python re-runs `_parse_terraform_outputs()` to read 
 
 2. **Check the summary** — identify which phase/step failed
 
-3. **Re-run the failed phase** using `--phase <name>`:
+3. **Re-run the failed phase** using `deploy --phase <name>`:
 
     ```bash
-    uv run sunbeam-deployer --device-ip <IP> --phase <failed-phase>
+    uv run sunbeam-deployer deploy --device-ip <IP> --phase <failed-phase>
     ```
 
 4. **Check Sunbeam logs inside the VM** (for cluster phase failures):
@@ -681,45 +680,51 @@ Based on real deployment data (3-node cluster on Testflinger):
 ## Complete CLI Reference
 
 ```bash
-sunbeam-deployer [-V] [-c FILE] [-v] [--phase PHASE] [flags]
-sunbeam-deployer {deploy,list-jobs} ...
+sunbeam-deployer [--version] COMMAND [ARGS]...
 
-Subcommands:
-  deploy              Deploy Sunbeam (default if no subcommand given)
+Commands:
+  deploy              Deploy Sunbeam
   list-jobs           List Testflinger jobs and their IP addresses
 
-General (deploy):
-  -V, --version              Show version and exit
+sunbeam-deployer deploy [OPTIONS]
+
+General options:
   -c, --config FILE          YAML configuration file
   -v, --verbose              DEBUG-level terminal output
   --phase PHASE              Run specific phase:
                                all (default), testflinger, host-setup,
                                vm-deploy, cluster
 
-Testflinger:
+Testflinger options:
   --testflinger              Enable Testflinger provisioning
   --tf-job-id JOB_ID         Attach to existing job UUID
   --tf-job-file FILE         Submit this job YAML
   --tf-ssh-key PATH          SSH private key for the machine
   --device-ip IP             Skip Testflinger, SSH directly to this IP
-  --cancel-on-failure        Auto-cancel Testflinger job if deployment fails
 
-Snap:
+Snap and deployment overrides:
   --snap-channel CHANNEL     Override snap channel (sets source=store)
   --snap-revision REV        Pin snap revision (sets source=store)
   --snap-file PATH           Install from local .snap file (sets source=local)
-
-Deployment:
   --deploy-mode MODE         Override deploy mode: manual or maas
   --repo-dir DIR             Override repo clone directory
+
+Behaviour flags:
   --accept-defaults          Pass --accept-defaults to sunbeam bootstrap
   --no-manifest              Skip pushing manifest.yaml to VMs
   --tf-arg ARG               Extra terraform arg (repeatable)
+  --cancel-on-failure        Auto-cancel Testflinger job if deployment fails
 
-list-jobs:
+sunbeam-deployer list-jobs [OPTIONS]
+
+Options:
   -v, --verbose              Enable verbose output
   -a, --all                  Show all jobs (default: active/reserve only)
   -f, --format FORMAT        Output format: table (default) or json
+
+Global:
+  --version                  Show version and exit
+  --help                     Show help and exit
 ```
 
 ### Exit Codes
@@ -737,14 +742,14 @@ list-jobs:
 
 ```text
 Do you have a Testflinger job UUID?
-├── Yes → uv run sunbeam-deployer --tf-job-id <UUID>
+├── Yes → uv run sunbeam-deployer deploy --tf-job-id <UUID>
 └── No
     ├── Do you want to provision a new machine?
-    │   ├── Yes → uv run sunbeam-deployer --testflinger
+    │   ├── Yes → uv run sunbeam-deployer deploy --testflinger
     │   └── No
     │       ├── Do you have a machine IP?
-    │       │   ├── Yes → uv run sunbeam-deployer --device-ip <IP>
-    │       │   └── No → uv run sunbeam-deployer  (runs locally)
+    │       │   ├── Yes → uv run sunbeam-deployer deploy --device-ip <IP>
+    │       │   └── No → uv run sunbeam-deployer deploy (runs locally)
     │       └──
     └──
 ```
@@ -753,18 +758,18 @@ Do you have a Testflinger job UUID?
 
 ```text
 Which phase failed?
-├── testflinger → Fix network/queue issues, re-run with --testflinger
+├── testflinger → Fix network/queue issues, re-run deploy --testflinger
 ├── host-setup
-│   ├── LXD issue → SSH in, fix manually, re-run --phase host-setup
+│   ├── LXD issue → SSH in, fix manually, re-run deploy --phase host-setup
 │   ├── Terraform issue → SSH in, cd to plan dir, debug terraform
-│   └── bootstrap.sh → Check LXD init, re-run --phase host-setup
+│   └── bootstrap.sh → Check LXD init, re-run deploy --phase host-setup
 ├── vm-deploy
-│   ├── Single VM → Fix the VM, re-run --phase vm-deploy (idempotent)
+│   ├── Single VM → Fix the VM, re-run deploy --phase vm-deploy (idempotent)
 │   └── All VMs → Check network, snap store access
 └── cluster
-    ├── DNS validation → Fix DNS container, re-run --phase cluster
-    ├── Bootstrap → Check sunbeam logs in bm0, re-run --phase cluster
-    └── Join → Check token, DNS, re-run --phase cluster
+    ├── DNS validation → Fix DNS container, re-run deploy --phase cluster
+    ├── Bootstrap → Check sunbeam logs in bm0, re-run deploy --phase cluster
+    └── Join → Check token, DNS, re-run deploy --phase cluster
 ```
 
 ### Choosing Snap Source

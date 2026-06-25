@@ -1,11 +1,12 @@
 [project]
 name = "sunbeam-deployer"
-version = "0.1.2"
+version = "0.1.3"
 description = "Automated Sunbeam (Canonical OpenStack) deployment on Testflinger machines."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "pyyaml>=6.0",
+    "rich-click>=1.0",
 ]
 
 [project.scripts]

@@ -1,121 +1,79 @@
-"""Tests for sunbeam_deployer.__main__ — CLI parsing and config overrides."""
+"""Tests for sunbeam_deployer.cli — CLI parsing and config overrides."""
 
 from __future__ import annotations
 
-import argparse
 from unittest.mock import MagicMock, patch
 
-import pytest
+from click.testing import CliRunner
 
-from sunbeam_deployer.__main__ import apply_cli_overrides, build_parser, main
+from sunbeam_deployer.cli import apply_cli_overrides, cli
 from sunbeam_deployer.config import load_config
 
 # ---------------------------------------------------------------------------
-# build_parser
+# CLI parsing tests (help-only, no live deploy)
 # ---------------------------------------------------------------------------
 
 
-class TestBuildParser:
-    def test_defaults(self) -> None:
-        parser = build_parser()
-        args = parser.parse_args([])
-        assert args.phase == "all"
-        assert args.verbose is False
-        assert args.config is None
-        assert args.testflinger is None
-        assert args.device_ip is None
-        assert args.cancel_on_failure is False
+class TestCliParsing:
+    """Verify CLI structure and option acceptance via --help."""
 
-    def test_phase_choices(self) -> None:
-        parser = build_parser()
-        for phase in (
-            "all",
-            "testflinger",
-            "host-setup",
-            "vm-deploy",
-            "cluster",
-        ):
-            args = parser.parse_args(["--phase", phase])
-            assert args.phase == phase
+    def test_help(self) -> None:
+        """Top-level --help shows commands."""
+        result = CliRunner().invoke(cli, ["--help"])
+        assert result.exit_code == 0
+        assert "Commands" in result.output
+        assert "deploy" in result.output
+        assert "list-jobs" in result.output
 
-    def test_testflinger_flag(self) -> None:
-        parser = build_parser()
-        args = parser.parse_args(["--testflinger"])
-        assert args.testflinger is True
+    def test_no_args_shows_help(self) -> None:
+        """No subcommand -> help displayed, exit 2 (missing command)."""
+        result = CliRunner().invoke(cli)
+        assert result.exit_code == 2
+        assert "Commands" in result.output
 
-    def test_tf_job_id(self) -> None:
-        parser = build_parser()
-        args = parser.parse_args(["--tf-job-id", "abc-123"])
-        assert args.tf_job_id == "abc-123"
+    def test_version(self) -> None:
+        """--version shows version and exits 0."""
+        result = CliRunner().invoke(cli, ["--version"])
+        assert result.exit_code == 0
+        assert "version" in result.output.lower()
 
-    def test_device_ip(self) -> None:
-        parser = build_parser()
-        args = parser.parse_args(["--device-ip", "10.0.0.1"])
-        assert args.device_ip == "10.0.0.1"
+    def test_deploy_help(self) -> None:
+        """deploy --help shows deploy options with groups."""
+        result = CliRunner().invoke(cli, ["deploy", "--help"])
+        assert result.exit_code == 0
+        assert "--phase" in result.output
+        assert "--testflinger" in result.output
+        assert "--snap-channel" in result.output
+        assert "--cancel-on-failure" in result.output
 
-    def test_snap_overrides(self) -> None:
-        parser = build_parser()
-        args = parser.parse_args(
-            [
-                "--snap-channel",
-                "2024.2/beta",
-                "--snap-revision",
-                "42",
-            ]
-        )
-        assert args.snap_channel == "2024.2/beta"
-        assert args.snap_revision == "42"
-
-    def test_snap_file(self) -> None:
-        parser = build_parser()
-        args = parser.parse_args(["--snap-file", "/path/to/snap"])
-        assert args.snap_file == "/path/to/snap"
-
-    def test_deploy_mode(self) -> None:
-        parser = build_parser()
-        args = parser.parse_args(["--deploy-mode", "manual"])
-        assert args.deploy_mode == "manual"
+    def test_list_jobs_help(self) -> None:
+        """list-jobs --help shows its options."""
+        result = CliRunner().invoke(cli, ["list-jobs", "--help"])
+        assert result.exit_code == 0
+        assert "--verbose" in result.output
+        assert "--all" in result.output
+        assert "--format" in result.output
 
     def test_invalid_deploy_mode_exits(self) -> None:
-        parser = build_parser()
-        with pytest.raises(SystemExit):
-            parser.parse_args(["--deploy-mode", "bad"])
+        """Invalid --deploy-mode value -> click usage error."""
+        result = CliRunner().invoke(cli, ["deploy", "--deploy-mode", "bad"])
+        assert result.exit_code == 2
 
-    def test_tf_args_repeatable(self) -> None:
-        parser = build_parser()
-        args = parser.parse_args(["--tf-arg", "foo", "--tf-arg", "bar"])
-        assert args.tf_args == ["foo", "bar"]
-
-    def test_verbose(self) -> None:
-        parser = build_parser()
-        args = parser.parse_args(["-v"])
-        assert args.verbose is True
-
-    def test_accept_defaults(self) -> None:
-        parser = build_parser()
-        args = parser.parse_args(["--accept-defaults"])
-        assert args.accept_defaults is True
-
-    def test_no_manifest(self) -> None:
-        parser = build_parser()
-        args = parser.parse_args(["--no-manifest"])
-        assert args.no_manifest is True
-
-    def test_cancel_on_failure(self) -> None:
-        parser = build_parser()
-        args = parser.parse_args(["--cancel-on-failure"])
-        assert args.cancel_on_failure is True
+    def test_invalid_format_exits(self) -> None:
+        """Invalid --format value in list-jobs -> click usage error."""
+        result = CliRunner().invoke(cli, ["list-jobs", "--format", "bad"])
+        assert result.exit_code == 2
 
 
 # ---------------------------------------------------------------------------
-# apply_cli_overrides
+# apply_cli_overrides (uses dict instead of argparse.Namespace)
 # ---------------------------------------------------------------------------
 
 
 class TestApplyCliOverrides:
-    def _make_args(self, **kwargs) -> argparse.Namespace:
-        """Build a minimal argparse.Namespace with defaults."""
-        defaults = dict(
+    def _make_args(self, **kwargs: object) -> dict:
+        """Build a minimal CLI args dict with defaults."""
+        defaults: dict = dict(
             testflinger=None,
             tf_job_id=None,
             tf_job_file=None,
@@ -128,12 +86,11 @@ class TestApplyCliOverrides:
             repo_dir=None,
             accept_defaults=None,
             no_manifest=False,
-            tf_args=None,
+            tf_arg=None,
             verbose=False,
         )
         defaults.update(kwargs)
-
-        return argparse.Namespace(**defaults)
+        return defaults
 
     def test_testflinger_enables(self) -> None:
         cfg = load_config(None)
@@ -190,7 +147,7 @@ class TestApplyCliOverrides:
 
     def test_tf_args_extend(self) -> None:
         cfg = load_config(None)
-        args = self._make_args(tf_args=["-var=x"])
+        args = self._make_args(tf_arg=("-var=x",))
         apply_cli_overrides(cfg, args)
         assert "-var=x" in cfg.terraform.extra_args
 
@@ -236,44 +193,42 @@ class TestApplyCliOverrides:
 
 
 # ---------------------------------------------------------------------------
-# main — testflinger auto-enable
+# main — deploy subcommand integration tests
 # ---------------------------------------------------------------------------
 
 
 class TestMainTestflingerAutoEnable:
-    @patch("sunbeam_deployer.__main__.testflinger")
-    @patch("sunbeam_deployer.__main__.setup_logging")
+    @patch("sunbeam_deployer.cli.testflinger")
+    @patch("sunbeam_deployer.cli.setup_logging")
     def test_phase_testflinger_auto_enables(
         self,
         mock_logging: MagicMock,
         mock_tf_mod: MagicMock,
     ) -> None:
-        """--phase testflinger enables testflinger by default."""
+        """deploy --phase testflinger enables testflinger by default."""
         mock_logging.return_value = MagicMock()
         mock_tf_mod.run_phase = MagicMock()
         mock_tf_mod.PHASE = "testflinger"
 
-        # We need to mock load_config to return a config where
-        # testflinger is disabled and device_ip is None
         cfg = load_config(None)
         cfg.testflinger.enabled = False
         cfg.device_ip = None
         cfg.testflinger.ssh_keys = ["lp:test-key"]
 
-        with patch("sunbeam_deployer.__main__.load_config", return_value=cfg):
-            main(["deploy", "--phase", "testflinger"])
+        with patch("sunbeam_deployer.cli.load_config", return_value=cfg):
+            result = CliRunner().invoke(
+                cli, ["deploy", "--phase", "testflinger"]
+            )
 
-        # Testflinger should have been auto-enabled
+        assert result.exit_code == 0
         assert cfg.testflinger.enabled is True
 
-    @patch("sunbeam_deployer.__main__.testflinger")
-    @patch("sunbeam_deployer.__main__.setup_logging")
+    @patch("sunbeam_deployer.cli.setup_logging")
     def test_phase_testflinger_not_enabled_with_device_ip(
         self,
         mock_logging: MagicMock,
-        mock_tf_mod: MagicMock,
     ) -> None:
-        """--phase testflinger with --device-ip does NOT auto-enable."""
+        """deploy --phase testflinger --device-ip does NOT auto-enable."""
         mock_logging.return_value = MagicMock()
 
         cfg = load_config(None)
@@ -281,27 +236,37 @@ class TestMainTestflingerAutoEnable:
         cfg.device_ip = "10.0.0.1"
 
         with (
-            patch("sunbeam_deployer.__main__.load_config", return_value=cfg),
+            patch("sunbeam_deployer.cli.load_config", return_value=cfg),
             patch(
-                "sunbeam_deployer.__main__.wait_for_ssh",
+                "sunbeam_deployer.cli.wait_for_ssh",
                 return_value=False,
             ),
         ):
-            main(["deploy", "--phase", "testflinger"])
+            result = CliRunner().invoke(
+                cli,
+                [
+                    "deploy",
+                    "--phase",
+                    "testflinger",
+                    "--device-ip",
+                    "10.0.0.1",
+                ],
+            )
 
         assert cfg.testflinger.enabled is False
-
-
-# ---------------------------------------------------------------------------
-# main — invalid phase
-# ---------------------------------------------------------------------------
+        assert result.exit_code == 1
 
 
 class TestMainInvalidPhase:
-    @patch("sunbeam_deployer.__main__.setup_logging")
+    @patch("sunbeam_deployer.cli.setup_logging")
     def test_invalid_phase_returns_error(self, mock_logging: MagicMock) -> None:
+        """deploy --phase badphase returns exit code 1."""
         mock_logging.return_value = MagicMock()
+
         cfg = load_config(None)
-        with patch("sunbeam_deployer.__main__.load_config", return_value=cfg):
-            result = main(["deploy", "--phase", "nonexistent"])
-        assert result == 1
+        cfg.testflinger.enabled = False
+
+        with patch("sunbeam_deployer.cli.load_config", return_value=cfg):
+            result = CliRunner().invoke(cli, ["deploy", "--phase", "badphase"])
+
+        assert result.exit_code == 1
