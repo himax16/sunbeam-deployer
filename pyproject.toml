@@ -1,6 +1,6 @@
 [project]
 name = "sunbeam-deployer"
-version = "0.1.4"
+version = "0.1.5"
 description = "Automated Sunbeam (Canonical OpenStack) deployment on Testflinger machines."
 readme = "README.md"
 requires-python = ">=3.10"

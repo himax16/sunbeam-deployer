@@ -11,8 +11,17 @@ from sunbeam_deployer.monitor import (
     Step,
 )
 
-# ---------------------------------------------------------------------------
-# Status enum
+
+def _render(obj: object) -> str:
+    """Render a rich object to plain text for assertions."""
+    from rich.console import Console
+
+    console = Console()
+    with console.capture() as capture:
+        console.print(obj)
+    return capture.get()
+
+
 # ---------------------------------------------------------------------------
 
 
@@ -202,7 +211,7 @@ class TestSummary:
         mon.add_phase("alpha")
         mon.start_phase("alpha")
         mon.end_phase("alpha", Status.SUCCESS)
-        text = mon.summary()
+        text = _render(mon.summary())
         assert "alpha" in text
 
     def test_summary_shows_success(self) -> None:
@@ -210,16 +219,15 @@ class TestSummary:
         mon.add_phase("p")
         mon.start_phase("p")
         mon.end_phase("p", Status.SUCCESS)
-        text = mon.summary()
+        text = _render(mon.summary())
         assert "SUCCESS" in text
-        assert "✅" in text
 
     def test_summary_shows_failure(self) -> None:
         mon = DeploymentMonitor()
         mon.add_phase("p")
         mon.start_phase("p")
         mon.end_phase("p", Status.FAILED)
-        text = mon.summary()
+        text = _render(mon.summary())
         assert "FAILED" in text
 
     def test_summary_includes_steps(self) -> None:
@@ -229,7 +237,7 @@ class TestSummary:
         with mon.run_step("p", "my-step", "My step description"):
             pass
         mon.end_phase("p", Status.SUCCESS)
-        text = mon.summary()
+        text = _render(mon.summary())
         assert "My step description" in text
 
     def test_summary_includes_step_errors(self) -> None:
@@ -240,7 +248,7 @@ class TestSummary:
         mon.start_step("p", "s")
         mon.end_step("p", "s", Status.FAILED, error="something broke")
         mon.end_phase("p", Status.FAILED)
-        text = mon.summary()
+        text = _render(mon.summary())
         assert "something broke" in text
 
     def test_summary_overall_failed_if_any_phase_failed(self) -> None:
@@ -251,7 +259,7 @@ class TestSummary:
         mon.add_phase("b")
         mon.start_phase("b")
         mon.end_phase("b", Status.FAILED)
-        text = mon.summary()
+        text = _render(mon.summary())
         assert "FAILED" in text
 
     def test_summary_skipped_counts_as_success(self) -> None:
@@ -259,11 +267,13 @@ class TestSummary:
         mon.add_phase("p")
         mon.start_phase("p")
         mon.end_phase("p", Status.SKIPPED)
-        text = mon.summary()
+        text = _render(mon.summary())
         assert "SUCCESS" in text
 
     def test_summary_contains_header(self) -> None:
         mon = DeploymentMonitor()
-        text = mon.summary()
-        assert "Sunbeam Deployment Summary" in text
+        mon.add_phase("p")
+        mon.start_phase("p")
+        mon.end_phase("p", Status.SUCCESS)
+        text = _render(mon.summary())
         assert "Total time:" in text

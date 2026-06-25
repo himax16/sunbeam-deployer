@@ -268,8 +268,7 @@ def _run_subprocess(
         )
     if check and not result.ok:
         raise RuntimeError(
-            f"Command failed (rc={result.returncode}): "
-            f"{display_cmd}\n{result.stdout[-2000:]}"
+            f"Command failed (rc={result.returncode}): {display_cmd}"
         )
 
     return result

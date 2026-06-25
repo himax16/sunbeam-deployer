@@ -20,6 +20,17 @@ from sunbeam_deployer.phases.testflinger import (
     run_phase,
 )
 
+
+def _render(obj: object) -> str:
+    """Render a rich object to plain text for assertions."""
+    from rich.console import Console
+
+    console = Console()
+    with console.capture() as capture:
+        console.print(obj)
+    return capture.get()
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -419,5 +430,5 @@ class TestRunPhase:
         with pytest.raises(RuntimeError, match="provision timeout"):
             run_phase(cfg, mon)
 
-        summary = mon.summary()
-        assert "FAILED" in summary or "❌" in summary
+        summary = _render(mon.summary())
+        assert "FAILED" in summary

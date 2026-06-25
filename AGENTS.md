@@ -2,7 +2,7 @@
 
 ## Overview
 
-Automated deployment of [Canonical Sunbeam](https://microstack.run/) (OpenStack) on [Testflinger](https://canonical-testflinger.readthedocs-hosted.com/latest/) bare-metal machines. Python CLI built with [click](https://click.palletsprojects.com/) + [rich-click](https://github.com/ewels/rich-click), managed by [uv](https://docs.astral.sh/uv/) + [hatchling](https://hatch.pypa.io/). Runtime dependencies: `click`, `rich-click`, `pyyaml`.
+Automated deployment of [Canonical Sunbeam](https://microstack.run/) (OpenStack) on [Testflinger](https://canonical-testflinger.readthedocs-hosted.com/latest/) bare-metal machines. Python CLI built with [rich-click](https://github.com/ewels/rich-click), managed by [uv](https://docs.astral.sh/uv/) + [hatchling](https://hatch.pypa.io/). Runtime dependencies: `rich-click`, `pyyaml`.
 
 The deployment process:
 
@@ -73,12 +73,12 @@ Add new dependencies to `pyproject.toml` under `[project] dependencies`, then `u
 sunbeam-deployer/            # Project root
 ├── sunbeam_deployer/        # Python package
 │   ├── __main__.py          # Thin entry point, delegates to cli.py
-│   ├── cli.py               # Click CLI: group, commands, deploy logic
+│   ├── cli.py               # rich-click CLI: group, commands, deploy logic
 │   ├── commands.py          # Subcommand handlers (list-jobs)
 │   ├── config.py            # Config loading
 │   ├── executor.py          # Command execution engine
-│   ├── logger.py            # Dual logging system
-│   ├── monitor.py           # Progress tracking
+│   ├── logger.py            # LiveDisplay spinner + rich handler, secret redaction
+│   ├── monitor.py           # Phase/step tracking, rich.Table summary
 │   ├── phases/              # Deployment phases
 │   │   ├── testflinger.py   # Phase 0
 │   │   ├── host_setup.py    # Phase 1
@@ -98,13 +98,15 @@ Testing is managed via [tox](https://tox.wiki/) with config in `tox.ini`. Two en
 
 ```bash
 uv run python -c "from sunbeam_deployer import __version__; print(__version__)"   # Import check
-uv run sunbeam-deployer --help # CLI loads
+uv run sunbeam-deployer --help # CLI loads (rich-click rendering)
 uv run python -c "from sunbeam_deployer.config import load_config; load_config()"  # Config parses
 uv run tox                                                                         # All checks (unit + lint)
 uv run tox -e unit                                                                 # Unit tests only
 uv run tox -e lint                                                                 # Compile checks only
 uv run tox -e unit -- -k "TestDeepMerge"                                           # Run specific tests
 ```
+
+**Note on test output**: `monitor.summary()` now returns a `rich.Table` object. Tests use `Console.capture()` to render it to plain text for assertions. When adding new monitor tests, use the `_render()` helper pattern from `tests/test_monitor.py`.
 
 **Run when touching executor, phases, or config schema:**
 
@@ -135,10 +137,11 @@ This is expensive (requires a provisioned machine). Skip for doc-only or logging
 | File | Responsibility |
 | ------ | --------------- |
 | `__main__.py` | Thin entry point, delegates to `cli.py` |
-| `cli.py` | Click group, commands (`deploy`, `list-jobs`), deploy logic, overrides |
+| `cli.py` | rich-click group, commands (`deploy`, `list-jobs`), deploy logic, overrides |
 | `config.py` | YAML loading, dataclass definitions, defaults, validation |
 | `executor.py` | All command execution: local, host (SSH-transparent), LXD VM |
-| `monitor.py` | Phase/step status tracking, summary table rendering |
+| `logger.py` | Dual logging — rich `LiveDisplay` (spinner + events) for terminal, plain text for file. Secret redaction. Module-level `update_spinner()`. No more `phase_logger`/`step_logger` adapters. |
+| `monitor.py` | Phase/step status tracking, `rich.Table` summary with coloured status, error extraction |
 | `phases/testflinger.py` | Phase 0: submit/attach TF job, poll, SSH setup |
 | `phases/host_setup.py` | Phase 1: delegates to `scripts/host-setup.sh`, then parses Terraform outputs |
 | `phases/vm_deploy.py` | Phase 2: per-VM snap install, prepare-node, manifest push (parallel) |
@@ -254,9 +257,11 @@ Edit these with extra caution — bugs here caused real deployment failures:
 | ---------------- | ------ | -------- |
 | `executor.py` — `run_host()`, `_run_via_ssh()` | **High** | All remote execution routes through here. Breaking SSH routing breaks everything. |
 | `host_setup.py` — `_run_host_setup_script()`, `_parse_terraform_outputs()` | **High** | `_run_host_setup_script()` pipes the standalone bash script with env vars (REPO_DIR must NOT be quoted for `~` expansion). `_parse_terraform_outputs()` is source of truth for VM metadata. Wrong parsing cascades to Phase 2 and 3. |
-| `cluster.py` — `_extract_token()`, `_join_node()`, `_resolve_cluster_nodes()` | **High** | Token parsing and join syntax are fragile. Positional arg order matters. Node filtering logic determines cluster topology. |
+| `cluster.py` — `_extract_token()`, `_join_node()`, `_resolve_cluster_nodes()` | **High** | Token parsing and join syntax are fragile. Positional arg order matters. Node filtering logic determines cluster topology. Error messages are kept brief (stdout omitted) — full output is in the log file. |
 | `config.py` — `_deep_merge()`, path handling | **Medium** | `~` must stay unexpanded for `repo_dir`. `_deep_merge` must not clobber nested keys. |
 | `vm_deploy.py` — `_push_manifest()` | **Medium** | Must use `run_host("test -f ...")` not `os.path.exists()` for remote checks. |
+| `logger.py` — `LiveDisplay`, `_LiveHandler` | **Medium** | Live display routes log events through a `deque`-backed render. The `_LiveHandler` is injected as a terminal handler. When verbose, no `LiveDisplay` is created — falls back to `RichHandler`. |
+| `monitor.py` — `summary()`, `_extract_error_lines()` | **Medium** | `summary()` now returns a `rich.Table` (not a string). `_extract_error_lines()` filters stdout for diagnostic keywords; if none found, keeps last 3 lines (max 5). |
 
 ## Decision Guidelines
 
@@ -412,23 +417,33 @@ When running `--phase vm-deploy` or `--phase cluster`, the tool automatically re
 
 ### Real-Time Terminal Output
 
-The deployer shows colored, phase-tagged output:
+The deployer shows a **spinner** with the current phase/step and a scrolling tail of recent log events:
 
 ```log
-14:32:01 ━━━ Phase: host-setup ━━━
-14:32:01   ▸ Install and initialise LXD
-14:32:05   ▸ Install Terraform snap
-14:32:10   ▸ Clone infrastructure repository
-14:32:15   ▸ Run infrastructure bootstrap (Terraform)
-14:37:22   ▸ Parse Terraform outputs
-14:37:22 ✅ Phase 'host-setup' success (5m21s)
+⠋ Phase: host-setup — Install and initialise LXD
+  16:32:01  ━━━ Phase: host-setup ━━━
+  16:32:01    ▸ Install and initialise LXD
+  16:32:05    ▸ Install Terraform snap
 ```
+
+In **verbose mode** (`-v`), the live display is replaced by a `RichHandler` that shows every log line with timestamps and rich tracebacks.
 
 **Status symbols**: ✅ success, ❌ failed, ⏳ pending, 🔄 running, ⏭️ skipped
 
 ### Log Files
 
-Full debug logs are written to `~/.local/share/sunbeam-deployer/logs/sunbeam-deploy-YYYYMMDD-HHMMSS.log`. The log file includes every command executed, every line of output (prefixed with ` | `), timing information, and SSH connection details (secrets redacted).
+Full debug logs are written to `~/.local/share/sunbeam-deployer/logs/sunbeam-deploy-YYYYMMDD-HHMMSS.log`. The log file includes every command executed, every line of output (prefixed with ` | `), timing information, and SSH connection details (secrets redacted). The log file path is also shown in the deployment summary footer.
+
+**For LLM agents monitoring deployments**: Start the deployment with `-v` to get full terminal output. If not using `-v`, the live display (default, non-verbose) shows a rolling 8-line event tail — not every log line. Parse the log file for the complete picture:
+
+```bash
+# Option 1: Start with verbose to see all output
+uv run sunbeam-deployer deploy --device-ip <IP> --phase <phase> -v
+
+# Option 2: Parse the log file (always has full output)
+LOG=$(ls -t ~/.local/share/sunbeam-deployer/logs/sunbeam-deploy-*.log | head -1)
+grep "FAILED\|ERROR" "$LOG" | tail -20
+```
 
 ```bash
 LOG=$(ls -t ~/.local/share/sunbeam-deployer/logs/sunbeam-deploy-*.log | head -1)    # Find latest log
@@ -809,19 +824,20 @@ To operate this deployment tool, an LLM agent needs the following capabilities:
 1. Verify prerequisites (uv, testflinger CLI, SSH access)
 2. Create/validate config.yaml
 3. Start deployment (uv run sunbeam-deployer ...)
-4. Monitor progress:
-   a. Tail the log file periodically
-   b. Check for error patterns
-   c. If stuck, check testflinger job status
-5. On completion:
-   a. Parse the summary output for success/failure
+4. Monitor progress (choose one):
+   a. Start with -v for full terminal output, OR
+   b. Tail the log file periodically
+5. Check for error patterns in the log file
+6. If stuck, check testflinger job status
+7. On completion:
+   a. Parse the summary table for success/failure
    b. If success: run verification checks
    c. If failure: identify failed phase, attempt recovery
-6. Handle post-deployment cancel prompt:
+8. Handle post-deployment cancel prompt:
    - If the job was submitted by the tool, it will prompt to cancel.
    - Answer "y" to release the machine, or "N" to keep it alive.
    - For attached jobs (--tf-job-id), cancel manually when done.
-7. Report results with:
+9. Report results with:
    - Overall status (success/failure)
    - Duration per phase
    - Any errors encountered

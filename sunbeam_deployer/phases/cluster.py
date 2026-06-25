@@ -167,11 +167,7 @@ def _bootstrap(
         )
 
         if not result.ok:
-            raise RuntimeError(
-                f"Cluster bootstrap failed on "
-                f"{node.hostname}:\n"
-                f"{result.stdout[-2000:]}"
-            )
+            raise RuntimeError(f"Cluster bootstrap failed on {node.hostname}.")
 
         log.info("Cluster bootstrap completed on %s", node.hostname)
 
@@ -225,11 +221,7 @@ def _join_node(
         )
 
         if not join_result.ok:
-            raise RuntimeError(
-                f"Cluster join failed on "
-                f"{node.hostname}:\n"
-                f"{join_result.stdout[-2000:]}"
-            )
+            raise RuntimeError(f"Cluster join failed on {node.hostname}.")
 
         log.info("Node %s joined the cluster", node.hostname)
 

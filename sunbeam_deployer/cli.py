@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+from contextlib import nullcontext
 from typing import Any
 
 import rich_click as click
+from rich.console import Console
 
 from sunbeam_deployer import __version__
 from sunbeam_deployer.commands import list_jobs
@@ -16,9 +18,11 @@ from sunbeam_deployer.executor import (
     set_remote_target,
     wait_for_ssh,
 )
-from sunbeam_deployer.logger import setup_logging
+from sunbeam_deployer.logger import LiveDisplay, setup_logging
 from sunbeam_deployer.monitor import DeploymentMonitor, Status
 from sunbeam_deployer.phases import cluster, host_setup, testflinger, vm_deploy
+
+console = Console()
 
 # ---------------------------------------------------------------------------
 # Rich-click configuration
@@ -107,7 +111,7 @@ def _deploy_options(f: Any) -> Any:
         "-v",
         "--verbose",
         is_flag=True,
-        help="Enable verbose (DEBUG) terminal output",
+        help="Enable verbose terminal output",
     )(f)
     f = click.option(
         "--phase",
@@ -226,7 +230,7 @@ def deploy_cmd(ctx: click.Context, **kwargs: Any) -> None:
     "-v",
     "--verbose",
     is_flag=True,
-    help="Enable verbose (DEBUG) output",
+    help="Enable verbose output",
 )
 @click.option(
     "-a",
@@ -339,7 +343,7 @@ def _run_deploy(cli_args: dict[str, Any]) -> int:
     try:
         cfg = load_config(cli_args.get("config"))
     except Exception as exc:
-        click.echo(f"Error loading config: {exc}", err=True)
+        console.print(f"[red]Error loading config: {exc}[/]")
         return 1
 
     apply_cli_overrides(cfg, cli_args)
@@ -347,14 +351,16 @@ def _run_deploy(cli_args: dict[str, Any]) -> int:
     # Re-validate after overrides
     errors = cfg.validate()
     if errors:
-        click.echo("Configuration errors:", err=True)
+        console.print("[red]Configuration errors:[/]")
         for e in errors:
-            click.echo(f"  \u2022 {e}", err=True)
+            console.print(f"  [red]•[/] {e}")
         return 1
 
-    # Set up logging
-    logger = setup_logging(cfg.logging.log_dir, cfg.logging.verbose)
-    logger.info("Sunbeam Deployer v%s", __version__)
+    # Set up logging — skip live display in verbose mode
+    display = None if cfg.logging.verbose else LiveDisplay()
+    logger = setup_logging(
+        cfg.logging.log_dir, cfg.logging.verbose, display=display
+    )
     logger.info("Deploy mode: %s", cfg.deploy_mode)
     if cfg.snap.source == "local":
         logger.info("Snap source: %s", cfg.snap.local_path)
@@ -387,72 +393,76 @@ def _run_deploy(cli_args: dict[str, Any]) -> int:
     mon = DeploymentMonitor()
     infra = None
     submitted_job = False
+    failed = False
 
-    try:
-        # Phase 0: Testflinger provisioning (or direct SSH)
-        direct_ip = cfg.device_ip
+    ctx = display or nullcontext()
+    with ctx:
+        try:
+            # Phase 0: Testflinger provisioning (or direct SSH)
+            direct_ip = cfg.device_ip
 
-        if "testflinger" in phases and cfg.testflinger.enabled:
-            pre_job_id = cfg.testflinger.job_id
-            testflinger.run_phase(cfg, mon)
-            if not pre_job_id and cfg.testflinger.job_id:
-                submitted_job = True
-        elif direct_ip:
-            logger.info("Connecting directly to %s", direct_ip)
-            ssh_user = cfg.testflinger.ssh_user
-            ssh_key = cfg.testflinger.ssh_key_path
-            if not wait_for_ssh(direct_ip, ssh_user, ssh_key, timeout=120):
-                logger.error("Cannot reach %s via SSH", direct_ip)
-                return 1
-            set_remote_target(
-                RemoteTarget(host=direct_ip, user=ssh_user, key_path=ssh_key)
-            )
+            if "testflinger" in phases and cfg.testflinger.enabled:
+                pre_job_id = cfg.testflinger.job_id
+                testflinger.run_phase(cfg, mon)
+                if not pre_job_id and cfg.testflinger.job_id:
+                    submitted_job = True
+            elif direct_ip:
+                logger.info("Connecting directly to %s", direct_ip)
+                ssh_user = cfg.testflinger.ssh_user
+                ssh_key = cfg.testflinger.ssh_key_path
+                if not wait_for_ssh(direct_ip, ssh_user, ssh_key, timeout=120):
+                    logger.error("Cannot reach %s via SSH", direct_ip)
+                    failed = True
+                else:
+                    set_remote_target(
+                        RemoteTarget(
+                            host=direct_ip,
+                            user=ssh_user,
+                            key_path=ssh_key,
+                        )
+                    )
 
-        # Phase 1: Host setup
-        if "host-setup" in phases:
-            infra = host_setup.run_phase(cfg, mon)
+            # Phase 1: Host setup
+            if not failed and "host-setup" in phases:
+                infra = host_setup.run_phase(cfg, mon)
 
-        # For single-phase runs, reconstruct infra from terraform
-        if infra is None and ("vm-deploy" in phases or "cluster" in phases):
-            logger.info(
-                "Reconstructing infrastructure info from Terraform outputs…"
-            )
-            from sunbeam_deployer.phases.host_setup import (
-                PHASE as HS_PHASE,
-            )
-            from sunbeam_deployer.phases.host_setup import (
-                _parse_terraform_outputs,
-            )
+            # For single-phase runs, reconstruct infra from terraform
+            if infra is None and ("vm-deploy" in phases or "cluster" in phases):
+                logger.info(
+                    "Reconstructing infrastructure info from Terraform outputs…"
+                )
+                from sunbeam_deployer.phases.host_setup import (
+                    PHASE as HS_PHASE,
+                )
+                from sunbeam_deployer.phases.host_setup import (
+                    _parse_terraform_outputs,
+                )
 
-            tmp_mon = DeploymentMonitor()
-            tmp_mon.add_phase(HS_PHASE)
-            tmp_mon.start_phase(HS_PHASE)
-            infra = _parse_terraform_outputs(cfg, tmp_mon)
-            tmp_mon.end_phase(HS_PHASE, Status.SUCCESS)
+                tmp_mon = DeploymentMonitor()
+                tmp_mon.add_phase(HS_PHASE)
+                tmp_mon.start_phase(HS_PHASE)
+                infra = _parse_terraform_outputs(cfg, tmp_mon)
+                tmp_mon.end_phase(HS_PHASE, Status.SUCCESS)
 
-        # Phase 2: VM deployment
-        if "vm-deploy" in phases:
-            assert infra is not None
-            vm_deploy.run_phase(cfg, mon, infra)
+            # Phase 2: VM deployment
+            if not failed and "vm-deploy" in phases:
+                assert infra is not None
+                vm_deploy.run_phase(cfg, mon, infra)
 
-        # Phase 3: Cluster bootstrap + join
-        if "cluster" in phases:
-            assert infra is not None
-            cluster.run_phase(cfg, mon, infra)
+            # Phase 3: Cluster bootstrap + join
+            if not failed and "cluster" in phases:
+                assert infra is not None
+                cluster.run_phase(cfg, mon, infra)
 
-    except Exception as exc:
-        logger.error("Deployment failed: %s", exc)
+        except Exception as exc:
+            logger.error("Deployment failed: %s", exc)
+            failed = True
 
-        if cli_args.get("cancel_on_failure") and cfg.testflinger.job_id:
-            logger.info("Cancelling Testflinger job due to deployment failure")
-            testflinger.cancel_job(cfg.testflinger.job_id)
-
-        click.echo(mon.summary())
-        return 1
-
-    click.echo(mon.summary())
-
-    # Post-deployment: prompt to cancel if we submitted the job
+            if cli_args.get("cancel_on_failure") and cfg.testflinger.job_id:
+                logger.info(
+                    "Cancelling Testflinger job due to deployment failure"
+                )
+                testflinger.cancel_job(cfg.testflinger.job_id)
     if submitted_job and cfg.testflinger.job_id:
         _prompt_cancel_job(logger, cfg.testflinger.job_id)
     elif cfg.testflinger.job_id:
@@ -469,5 +479,8 @@ def _run_deploy(cli_args: dict[str, Any]) -> int:
                 "Testflinger job: %s (failed to get connection info)",
                 cfg.testflinger.job_id,
             )
+    console.print(mon.summary())
+    if failed:
+        return 1
 
     return 0

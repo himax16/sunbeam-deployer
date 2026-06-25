@@ -7,9 +7,16 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 
-from sunbeam_deployer.logger import set_log_indent
+from rich.table import Table
+from rich.text import Text
+
+import sunbeam_deployer.logger as logger
 
 log = logging.getLogger("sunbeam_deployer.monitor")
+
+SUMMARY_PHASE_COL_WIDTH = 60
+SUMMARY_STATUS_COL_WIDTH = 8
+SUMMARY_DURATION_COL_WIDTH = 10
 
 
 class Status(Enum):
@@ -84,6 +91,17 @@ class Phase:
         return f"{hours}h{mins:02d}m{secs:02d}s"
 
 
+class SingleLineText(Text):
+    """Helper class to render a single line text in rich Table"""
+
+    def __rich_measure__(self, console, options):
+        return (
+            super()
+            .__rich_measure__(console, options)
+            .with_minimum(options.max_width)
+        )
+
+
 class DeploymentMonitor:
     """Tracks overall deployment progress across phases and steps."""
 
@@ -104,9 +122,10 @@ class DeploymentMonitor:
         phase = self._phase_map[name]
         phase.status = Status.RUNNING
         phase.start_time = time.monotonic()
-        set_log_indent(0)
+        logger.set_log_indent(0)
+        logger.update_spinner(f"Phase: {name}")
         log.info("━━━ Phase: %s ━━━", name)
-        set_log_indent(1)
+        logger.set_log_indent(1)
         return phase
 
     def end_phase(
@@ -115,7 +134,7 @@ class DeploymentMonitor:
         phase = self._phase_map[name]
         phase.status = status
         phase.end_time = time.monotonic()
-        set_log_indent(0)
+        logger.set_log_indent(0)
         sym = status.symbol
         log.info(
             "%s Phase '%s' %s (%s)", sym, name, status.value, phase.duration_str
@@ -133,10 +152,11 @@ class DeploymentMonitor:
     def start_step(self, phase_name: str, step_name: str) -> Step:
         step = self._find_step(phase_name, step_name)
         step.status = Status.RUNNING
-        step.start_time = time.monotonic()
-        set_log_indent(1)
-        log.info("▸ %s", step.description or step_name)
-        set_log_indent(2)
+        logger.set_log_indent(1)
+        desc = step.description or step_name
+        logger.update_spinner(f"Phase: {phase_name} — {desc}")
+        log.info("▸ %s", desc)
+        logger.set_log_indent(2)
         return step
 
     def end_step(
@@ -150,7 +170,7 @@ class DeploymentMonitor:
         step.status = status
         step.end_time = time.monotonic()
         step.error = error
-        set_log_indent(1)
+        logger.set_log_indent(1)
         if status == Status.FAILED:
             log.error(
                 "%s %s — FAILED (%s)",
@@ -159,10 +179,10 @@ class DeploymentMonitor:
                 step.duration_str,
             )
             if error:
-                set_log_indent(2)
-                for line in error.splitlines()[:5]:
+                logger.set_log_indent(2)
+                for line in _extract_error_lines(error):
                     log.error("%s", line)
-                set_log_indent(1)
+                logger.set_log_indent(1)
         else:
             log.debug("%s %s (%s)", status.symbol, step_name, step.duration_str)
 
@@ -177,7 +197,8 @@ class DeploymentMonitor:
 
     # -- Summary ---------------------------------------------------------------
 
-    def summary(self) -> str:
+    def summary(self) -> Table:
+        """Return a rich Table summarising the deployment."""
         total = time.monotonic() - self._overall_start
         mins, secs = divmod(int(total), 60)
         hours, mins = divmod(mins, 60)
@@ -187,28 +208,6 @@ class DeploymentMonitor:
             else f"{mins}m{secs:02d}s"
         )
 
-        lines = [
-            "",
-            "╔══════════════════════════════════════════════════════╗",
-            "║              Sunbeam Deployment Summary              ║",
-            "╚══════════════════════════════════════════════════════╝",
-            f"  Total time: {time_str}",
-            "",
-        ]
-
-        for phase in self.phases:
-            lines.append(
-                f"  {phase.status.symbol} {phase.name} ({phase.duration_str})"
-            )
-            for step in phase.steps:
-                desc = step.description or step.name
-                lines.append(
-                    f"      {step.status.symbol} {desc} ({step.duration_str})"
-                )
-                if step.error:
-                    for err_line in step.error.splitlines()[:3]:
-                        lines.append(f"          ⚠ {err_line}")
-
         overall = (
             Status.SUCCESS
             if all(
@@ -217,10 +216,83 @@ class DeploymentMonitor:
             )
             else Status.FAILED
         )
-        lines.append("")
-        lines.append(f"  Overall: {overall.symbol} {overall.value.upper()}")
-        lines.append("")
-        return "\n".join(lines)
+        overall_style = "green" if overall == Status.SUCCESS else "red"
+
+        table = Table(
+            title="Sunbeam Deployment Summary",
+            title_style="bold",
+            header_style="bold cyan",
+            border_style="bright_blue",
+            caption_justify="right",
+            expand=True,
+        )
+        table.add_column(
+            "Phase / Step",
+            style="bold",
+        )
+        table.add_column(
+            "Status",
+            justify="center",
+            width=SUMMARY_STATUS_COL_WIDTH,
+        )
+        table.add_column(
+            "Duration",
+            justify="right",
+            width=SUMMARY_DURATION_COL_WIDTH,
+        )
+
+        for phase in self.phases:
+            pstyle = (
+                "green"
+                if phase.status == Status.SUCCESS
+                else "red"
+                if phase.status == Status.FAILED
+                else "yellow"
+            )
+            table.add_row(
+                phase.name,
+                f"[{pstyle}]{phase.status.symbol}[/]",
+                phase.duration_str,
+            )
+            for step in phase.steps:
+                sstyle = (
+                    "green"
+                    if step.status == Status.SUCCESS
+                    else "red"
+                    if step.status == Status.FAILED
+                    else "yellow"
+                )
+                desc = step.description or step.name
+                table.add_row(
+                    f"  {desc}",
+                    f"[{sstyle}]{step.status.symbol}[/]",
+                    step.duration_str,
+                )
+                if step.error:
+                    err_lines = _extract_error_lines(step.error)
+                    for err_line in err_lines:
+                        err_log = SingleLineText(
+                            f"    {err_line}",
+                            no_wrap=True,
+                            overflow="ellipsis",
+                        )
+                        err_log.stylize("red")
+                        table.add_row(err_log, "", "")
+
+            # If there is a next phase, add a separator row
+            if phase != self.phases[-1]:
+                table.add_section()
+
+        # Add footer with where the log file is located and the total time taken
+        footer = (
+            f"Log file: {logger._log_file_path}\n"
+            f"Total time: {time_str}   "
+            f"Overall: [{overall_style}]{overall.symbol} "
+            f"{overall.value.upper()}[/]"
+        )
+        table.caption = footer
+
+        return table
 
     # -- Internals -------------------------------------------------------------
 
@@ -258,3 +330,37 @@ class _StepContext:
                 error=str(exc_val),
             )
         return False  # don't suppress
+
+
+def _extract_error_lines(error: str) -> list[str]:
+    """Extract meaningful error/diagnostic lines from a command's stdout.
+
+    Filters out Terraform plan details (lines with ``"network"``, ``device``,
+    ``properties``, etc.) and keeps only actionable lines: Terraform ``Error:``
+    blocks, ``Traceback``, ``RuntimeError``, ``exit code``, and the last few
+    lines of the output.
+    """
+    lines = error.splitlines()
+    # Keep lines that are clearly diagnostic
+    keep: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        # Always keep these
+        if any(
+            kw in stripped
+            for kw in (
+                "Error:",
+                "Traceback",
+                "RuntimeError",
+                "exit code",
+                "Command failed",
+                "already exists",
+                "FAILED",
+                "failed after",
+            )
+        ):
+            keep.append(line)
+    # If nothing matched, keep last 3 lines as a fallback
+    if not keep:
+        keep = lines[-3:]
+    return keep[-5:]  # max 5 lines

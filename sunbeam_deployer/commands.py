@@ -5,14 +5,18 @@ from __future__ import annotations
 import json
 import logging
 import re
-import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+
+from rich.console import Console
+from rich.table import Table
 
 from sunbeam_deployer.executor import run_local
 from sunbeam_deployer.phases import testflinger
 
 log = logging.getLogger("sunbeam_deployer.commands")
+
+console = Console()
 
 # Regex to identify a job line starting with a UUID
 _UUID_RE = re.compile(r"^([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})")
@@ -146,7 +150,7 @@ def list_jobs(
 
     except Exception as exc:
         log.error("Failed to list jobs: %s", exc)
-        print(f"Error: {exc}", file=sys.stderr)
+        console.print(f"[red]Error: {exc}[/]")
         return 1
 
 
@@ -295,57 +299,44 @@ def _get_job_show(job_id: str) -> dict:
 
 
 def _output_table(jobs: list[JobInfo]) -> None:
-    """Print jobs as a formatted table."""
+    """Print jobs as a rich Table."""
     if not jobs:
-        print("No jobs found")
+        console.print("[yellow]No jobs found[/]")
         return
 
-    # Pre-compute display values
-    cols = {
-        "job_id": ("Job ID", [j.job_id for j in jobs]),
-        "status": (
-            "Status",
-            [j.status or "unknown" for j in jobs],
-        ),
-        "ip": (
-            "IP Address",
-            [j.device_ip or "N/A" for j in jobs],
-        ),
-        "agent": (
-            "Agent",
-            [j.agent_name or "N/A" for j in jobs],
-        ),
-        "runtime": (
-            "Runtime",
-            [j.runtime_str() for j in jobs],
-        ),
-        "reserved": (
-            "Reserved",
-            [j.reserve_timeout_str() for j in jobs],
-        ),
-    }
+    table = Table(
+        title="Testflinger Jobs",
+        title_style="bold",
+        header_style="bold cyan",
+        border_style="bright_blue",
+        expand=True,
+    )
+    table.add_column("Job ID", style="bold")
+    table.add_column("Status", justify="center")
+    table.add_column("IP Address", justify="center")
+    table.add_column("Agent", justify="center")
+    table.add_column("Runtime", justify="center")
+    table.add_column("Reserved", justify="center")
 
-    widths = {
-        k: max(len(header), max(len(v) for v in vals))
-        for k, (header, vals) in cols.items()
-    }
+    for job in jobs:
+        status = job.status or "unknown"
+        style = (
+            "green"
+            if status in {"reserve", "test"}
+            else "yellow"
+            if status in _ACTIVE_PHASES
+            else "red"
+        )
+        table.add_row(
+            job.job_id,
+            f"[{style}]{status}[/]",
+            job.device_ip or "N/A",
+            job.agent_name or "N/A",
+            job.runtime_str(),
+            job.reserve_timeout_str(),
+        )
 
-    col_order = [
-        "job_id",
-        "status",
-        "ip",
-        "agent",
-        "runtime",
-        "reserved",
-    ]
-
-    header = "  ".join(cols[c][0].ljust(widths[c]) for c in col_order)
-    print(header)
-    print("─" * len(header))
-
-    for i in range(len(jobs)):
-        row = "  ".join(cols[c][1][i].ljust(widths[c]) for c in col_order)
-        print(row)
+    console.print(table)
 
 
 def _output_json(jobs: list[JobInfo]) -> None:
@@ -354,4 +345,4 @@ def _output_json(jobs: list[JobInfo]) -> None:
         "jobs": [j.to_dict() for j in jobs],
         "count": len(jobs),
     }
-    print(json.dumps(output, indent=2))
+    console.print_json(data=output)
