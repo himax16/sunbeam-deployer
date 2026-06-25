@@ -105,7 +105,7 @@ terraform:
 
 # Logging
 logging:
-  log_dir: ./logs
+  log_dir: ~/.local/share/sunbeam-deployer/logs
   verbose: false
 
 # Timeouts (seconds) for each operation

@@ -70,7 +70,7 @@ Add new dependencies to `pyproject.toml` under `[project] dependencies`, then `u
 ### File System Layout
 
 ```text
-sunbeam-deployer/             # Project root
+sunbeam-deployer/            # Project root
 ├── sunbeam_deployer/        # Python package
 │   ├── __main__.py          # Thin entry point, delegates to cli.py
 │   ├── cli.py               # Click CLI: group, commands, deploy logic
@@ -87,8 +87,7 @@ sunbeam-deployer/             # Project root
 │   └── scripts/
 │       └── host-setup.sh    # Standalone bash script for Phase 1
 ├── config.example.yaml      # Reference configuration
-├── pyproject.toml            # Project metadata
-└── logs/                    # Log files (created at runtime)
+└── pyproject.toml           # Project metadata
 ```
 
 ## Testing & Verification
@@ -99,7 +98,7 @@ Testing is managed via [tox](https://tox.wiki/) with config in `tox.ini`. Two en
 
 ```bash
 uv run python -c "from sunbeam_deployer import __version__; print(__version__)"   # Import check
-uv run sunbeam-deployer --help                                                     # CLI loads
+uv run sunbeam-deployer --help # CLI loads
 uv run python -c "from sunbeam_deployer.config import load_config; load_config()"  # Config parses
 uv run tox                                                                         # All checks (unit + lint)
 uv run tox -e unit                                                                 # Unit tests only
@@ -109,6 +108,7 @@ uv run tox -e unit -- -k "TestDeepMerge"                                        
 
 **Run when touching executor, phases, or config schema:**
 
+```bash
 uv run sunbeam-deployer deploy --device-ip <IP> --phase host-setup -v   # Smoke test against real machine
 ```
 
@@ -402,7 +402,6 @@ Phases run in order: `testflinger` (~5-30 min) → `host-setup` (~5 min) → `vm
 | Direct SSH | `uv run sunbeam-deployer deploy --device-ip 10.241.2.45` | Skip Testflinger entirely |
 | Local machine | `uv run sunbeam-deployer deploy` | Machine running the tool IS the target |
 
-
 ```bash
 uv run sunbeam-deployer deploy --device-ip 10.241.2.45 --phase host-setup
 uv run sunbeam-deployer deploy --device-ip 10.241.2.45 --phase vm-deploy
@@ -429,10 +428,10 @@ The deployer shows colored, phase-tagged output:
 
 ### Log Files
 
-Full debug logs are written to `./logs/sunbeam-deploy-YYYYMMDD-HHMMSS.log`. The log file includes every command executed, every line of output (prefixed with ` | `), timing information, and SSH connection details (secrets redacted).
+Full debug logs are written to `~/.local/share/sunbeam-deployer/logs/sunbeam-deploy-YYYYMMDD-HHMMSS.log`. The log file includes every command executed, every line of output (prefixed with ` | `), timing information, and SSH connection details (secrets redacted).
 
 ```bash
-LOG=$(ls -t logs/sunbeam-deploy-*.log | head -1)    # Find latest log
+LOG=$(ls -t ~/.local/share/sunbeam-deployer/logs/sunbeam-deploy-*.log | head -1)    # Find latest log
 tail -f "$LOG"                                       # Follow real-time
 grep "━━━ Phase:" "$LOG" | tail -1                   # Current phase
 grep -c "FAILED\|ERROR" "$LOG"                       # Error count
@@ -546,7 +545,7 @@ After the script completes, Python re-runs `_parse_terraform_outputs()` to read 
 1. **Read the log file** — it contains every command and output:
 
     ```bash
-    LOG=$(ls -t logs/sunbeam-deploy-*.log | head -1)
+    LOG=$(ls -t ~/.local/share/sunbeam-deployer/logs/sunbeam-deploy-*.log | head -1)
     grep "FAILED\|ERROR\|error\|failed" "$LOG" | tail -20
     ```
 
@@ -744,14 +743,12 @@ Global:
 Do you have a Testflinger job UUID?
 ├── Yes → uv run sunbeam-deployer deploy --tf-job-id <UUID>
 └── No
-    ├── Do you want to provision a new machine?
-    │   ├── Yes → uv run sunbeam-deployer deploy --testflinger
-    │   └── No
-    │       ├── Do you have a machine IP?
-    │       │   ├── Yes → uv run sunbeam-deployer deploy --device-ip <IP>
-    │       │   └── No → uv run sunbeam-deployer deploy (runs locally)
-    │       └──
-    └──
+    └── Do you want to provision a new machine?
+        ├── Yes → uv run sunbeam-deployer deploy --testflinger
+        └── No
+            └── Do you have a machine IP?
+                ├── Yes → uv run sunbeam-deployer deploy --device-ip <IP>
+                └── No → uv run sunbeam-deployer deploy (runs locally)
 ```
 
 ### How to Resume After Failure?
@@ -794,8 +791,7 @@ To operate this deployment tool, an LLM agent needs the following capabilities:
 | Tool | Purpose | Usage |
 | ------ | --------- | ------- |
 | **Shell/Bash execution** | Run CLI commands | `uv run sunbeam-deployer ...`, `ssh`, `testflinger` |
-| **File read** | Read config files and logs | Read `config.yaml`, `logs/*.log` |
-| **File write/edit** | Create/modify config files | Write `config.yaml` |
+| **File read** | Read config files and logs | Read `config.yaml`, `~/.local/share/sunbeam-deployer/logs/*.log` |
 | **SSH** | Connect to remote machines for debugging | `ssh ubuntu@<ip>` |
 
 ### Minimum Agent Capabilities

@@ -52,7 +52,7 @@ _DEFAULTS: dict[str, Any] = {
         "vm_boot_timeout": "15m",
     },
     "logging": {
-        "log_dir": "./logs",
+        "log_dir": "~/.local/share/sunbeam-deployer/logs",
         "verbose": False,
     },
     "timeouts": {
