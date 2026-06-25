@@ -50,7 +50,7 @@ uv run sunbeam-deployer --version     # Expect: sunbeam-deployer 0.1.0
 
 Add new dependencies to `pyproject.toml` under `[project] dependencies`, then `uv sync`.
 
-**Build note**: Project name is `sunbeam-deploy-bot`, package dir is `sunbeam_deployer`. The mapping lives in `[tool.hatch.build.targets.wheel] packages = ["sunbeam_deployer"]`. Do not rename either without updating this.
+**Build note**: Project name is `sunbeam-deployer`, package dir is `sunbeam_deployer`. The mapping lives in `[tool.hatch.build.targets.wheel] packages = ["sunbeam_deployer"]`. Do not rename either without updating this.
 
 ### Prerequisites
 
@@ -70,7 +70,7 @@ Add new dependencies to `pyproject.toml` under `[project] dependencies`, then `u
 ### File System Layout
 
 ```text
-sunbeam-deploy-bot/          # Project root
+sunbeam-deployer/             # Project root
 ├── sunbeam_deployer/        # Python package
 │   ├── __main__.py          # CLI entry point (argparse, subcommand dispatch)
 │   ├── commands.py          # Subcommand handlers (list-jobs)

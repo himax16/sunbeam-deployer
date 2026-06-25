@@ -229,8 +229,8 @@ wheels = [
 ]
 
 [[package]]
-name = "sunbeam-deploy-bot"
-version = "0.1.0"
+name = "sunbeam-deployer"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "pyyaml" },
