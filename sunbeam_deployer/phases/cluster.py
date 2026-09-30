@@ -54,6 +54,14 @@ def run_phase(
         for node in secondaries:
             _join_node(cfg, mon, primary, node)
 
+        # Expand the control plane when control nodes were joined. Resizing
+        # recomputes the per-cluster values (e.g. ceph-osd-replication-count)
+        # that were fixed at single-node bootstrap time.
+        if secondaries and any("control" in n.roles for n in secondaries):
+            _resize_cluster(cfg, mon, primary)
+        else:
+            log.info("No control nodes joined — skipping cluster resize")
+
         mon.end_phase(PHASE, Status.SUCCESS)
 
     except Exception as exc:
@@ -224,6 +232,38 @@ def _join_node(
             raise RuntimeError(f"Cluster join failed on {node.hostname}.")
 
         log.info("Node %s joined the cluster", node.hostname)
+
+
+def _resize_cluster(
+    cfg: DeployConfig,
+    mon: DeploymentMonitor,
+    primary: ComputeNode,
+) -> None:
+    """Resize the cluster to include the joined control nodes.
+
+    ``sunbeam cluster resize`` recomputes the clustered values that were
+    pinned when the primary node was bootstrapped (control-plane scale and
+    ``ceph-osd-replication-count`` in particular). Without this, a multi-node
+    cluster keeps the single-node replication count, which breaks charms
+    (e.g. gnocchi) that request a Ceph pool at that size.
+    """
+    with mon.run_step(
+        PHASE, "resize", "Resize cluster to include joined control nodes"
+    ):
+        cmd = f"sunbeam cluster resize --topology {cfg.sunbeam.resize_topology}"
+        log.info(
+            "Resizing cluster on %s (topology=%s)",
+            primary.hostname,
+            cfg.sunbeam.resize_topology,
+        )
+        result = run_in_vm(
+            primary.name,
+            cmd,
+            timeout=cfg.timeouts.cluster_resize,
+        )
+        if not result.ok:
+            raise RuntimeError(f"Cluster resize failed on {primary.hostname}.")
+        log.info("Cluster resized to include joined control nodes")
 
 
 def _extract_token(output: str) -> str | None:

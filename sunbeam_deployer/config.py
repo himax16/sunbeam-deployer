@@ -45,6 +45,7 @@ _DEFAULTS: dict[str, Any] = {
         "accept_defaults": False,
         "bootstrap_extra_args": [],
         "cluster_node_count": 0,
+        "resize_topology": "auto",
     },
     "terraform": {
         "extra_args": [],
@@ -61,6 +62,7 @@ _DEFAULTS: dict[str, Any] = {
         "prepare_node": 600,
         "cluster_bootstrap": 7200,
         "cluster_join": 3600,
+        "cluster_resize": 7200,
         "terraform_apply": 3600,
     },
     "concurrency": {
@@ -129,6 +131,7 @@ class SunbeamConfig:
     accept_defaults: bool
     bootstrap_extra_args: list[str]
     cluster_node_count: int
+    resize_topology: str = "auto"
 
     def validate(self) -> list[str]:
         errors: list[str] = []
@@ -139,6 +142,12 @@ class SunbeamConfig:
             errors.append(
                 "sunbeam.cluster_node_count must be a"
                 " non-negative integer (0 = all nodes)"
+            )
+        if self.resize_topology not in ("auto", "single", "multi", "large"):
+            errors.append(
+                "sunbeam.resize_topology must be one of "
+                "'auto', 'single', 'multi', 'large', "
+                f"got '{self.resize_topology}'"
             )
         return errors
 
@@ -163,6 +172,7 @@ class TimeoutsConfig:
     prepare_node: int
     cluster_bootstrap: int
     cluster_join: int
+    cluster_resize: int
     terraform_apply: int
 
 

@@ -153,6 +153,69 @@ class TestRunPhaseMultiNode:
 
 
 # ---------------------------------------------------------------------------
+# run_phase — cluster resize
+# ---------------------------------------------------------------------------
+
+
+class TestRunPhaseResize:
+    @patch("sunbeam_deployer.phases.cluster.run_in_vm")
+    def test_resize_after_joining_control_nodes(
+        self, mock_run: MagicMock
+    ) -> None:
+        token = "eyJ0ZXN0IjoiYWJjZGVmMTIzNDU2Nzg5MCJ9"
+        mock_run.return_value = MagicMock(ok=True, stdout=f"token: {token}\n")
+        cfg = _make_cfg(cluster_node_count=0)
+        mon = DeploymentMonitor()
+        infra = _make_infra("bm0", "bm1", "bm2")
+
+        run_phase(cfg, mon, infra)
+
+        cmds = [call.args[1] for call in mock_run.call_args_list]
+        resize = [c for c in cmds if "cluster resize" in c]
+        assert len(resize) == 1
+        assert "cluster resize --topology auto" in resize[0]
+
+    @patch("sunbeam_deployer.phases.cluster.run_in_vm")
+    def test_single_node_skips_resize(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = MagicMock(ok=True, stdout="")
+        cfg = _make_cfg(cluster_node_count=1)
+        mon = DeploymentMonitor()
+        infra = _make_infra("bm0", "bm1", "bm2")
+
+        run_phase(cfg, mon, infra)
+
+        cmds = [call.args[1] for call in mock_run.call_args_list]
+        assert not any("cluster resize" in c for c in cmds)
+
+    @patch("sunbeam_deployer.phases.cluster.run_in_vm")
+    def test_no_resize_without_control_role(self, mock_run: MagicMock) -> None:
+        token = "eyJ0ZXN0IjoiYWJjZGVmMTIzNDU2Nzg5MCJ9"
+        mock_run.return_value = MagicMock(ok=True, stdout=f"token: {token}\n")
+        cfg = _make_cfg(cluster_node_count=0)
+        mon = DeploymentMonitor()
+        infra = InfraInfo(
+            nodes=[
+                _make_node("bm0"),
+                ComputeNode(
+                    name="bm1",
+                    fqdn="bm1.test.local",
+                    hostname="bm1",
+                    ip="10.0.0.2",
+                    roles=["compute"],
+                ),
+            ],
+            plan_dir="/tmp/plan",
+            manifest_path="/tmp/manifest.yaml",
+            ssh_private_key_path="/tmp/key",
+        )
+
+        run_phase(cfg, mon, infra)
+
+        cmds = [call.args[1] for call in mock_run.call_args_list]
+        assert not any("cluster resize" in c for c in cmds)
+
+
+# ---------------------------------------------------------------------------
 # run_phase — error cases
 # ---------------------------------------------------------------------------
 

@@ -88,6 +88,11 @@ sunbeam:
   # Extra arguments appended to the bootstrap command
   # bootstrap_extra_args: []
 
+  # Topology used for `sunbeam cluster resize` after control nodes are joined.
+  # "auto" (default) lets sunbeam determine it from the node count; override
+  # with "single", "multi", or "large" to pin the control-plane layout.
+  # resize_topology: auto
+
 # Terraform settings
 terraform:
   # Extra arguments passed to bootstrap.sh / terraform apply
@@ -115,6 +120,7 @@ timeouts:
   prepare_node: 600        # sunbeam prepare-node-script timeout
   cluster_bootstrap: 7200  # Cluster bootstrap (can take 30-60+ min)
   cluster_join: 5400       # Cluster join per node
+  cluster_resize: 7200     # sunbeam cluster resize after joining control nodes
   terraform_apply: 3600    # Terraform apply timeout
 
 # Concurrency control
