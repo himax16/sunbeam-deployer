@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import copy
 import os
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +48,17 @@ _DEFAULTS: dict[str, Any] = {
         "cluster_node_count": 0,
         "resize_topology": "auto",
     },
+    "observability": {
+        "enabled": False,
+        "channel": "1/stable",
+        "storage": {
+            "prometheus": "20G",
+            "loki_index": "2G",
+            "loki_chunks": "5G",
+            "grafana": "1G",
+            "alertmanager": "1G",
+        },
+    },
     "terraform": {
         "extra_args": [],
         "bootstrap_retries": 1,
@@ -64,6 +76,8 @@ _DEFAULTS: dict[str, Any] = {
         "cluster_join": 3600,
         "cluster_resize": 7200,
         "terraform_apply": 3600,
+        "observability_enable": 5400,
+        "observability_verify": 900,
     },
     "concurrency": {
         "vm_deploy": 2,
@@ -152,6 +166,47 @@ class SunbeamConfig:
         return errors
 
 
+_STORAGE_SIZE_RE = re.compile(r"^\d+(\.\d+)?(Ki|Mi|Gi|Ti|Pi|K|M|G|T|P)$")
+
+
+@dataclass
+class ObservabilityStorageConfig:
+    prometheus: str = "20G"
+    loki_index: str = "2G"
+    loki_chunks: str = "5G"
+    grafana: str = "1G"
+    alertmanager: str = "1G"
+
+    def validate(self) -> list[str]:
+        errors: list[str] = []
+        for name in (
+            "prometheus",
+            "loki_index",
+            "loki_chunks",
+            "grafana",
+            "alertmanager",
+        ):
+            v = getattr(self, name)
+            if not _STORAGE_SIZE_RE.match(str(v)):
+                errors.append(
+                    f"observability.storage.{name}: invalid size '{v}' "
+                    "(e.g. 20G, 512Mi)"
+                )
+        return errors
+
+
+@dataclass
+class ObservabilityConfig:
+    enabled: bool = False
+    channel: str = "1/stable"
+    storage: ObservabilityStorageConfig = field(
+        default_factory=ObservabilityStorageConfig
+    )
+
+    def validate(self) -> list[str]:
+        return self.storage.validate() if self.enabled else []
+
+
 @dataclass
 class TerraformConfig:
     extra_args: list[str]
@@ -174,6 +229,8 @@ class TimeoutsConfig:
     cluster_join: int
     cluster_resize: int
     terraform_apply: int
+    observability_enable: int
+    observability_verify: int
 
 
 @dataclass
@@ -226,6 +283,7 @@ class DeployConfig:
     logging: LoggingConfig
     timeouts: TimeoutsConfig
     concurrency: ConcurrencyConfig
+    observability: ObservabilityConfig
     device_ip: str | None = None
 
     def validate(self) -> list[str]:
@@ -240,6 +298,7 @@ class DeployConfig:
         errors.extend(self.testflinger.validate())
         errors.extend(self.snap.validate())
         errors.extend(self.sunbeam.validate())
+        errors.extend(self.observability.validate())
         return errors
 
 
@@ -266,6 +325,11 @@ def load_config(path: str | Path | None = None) -> DeployConfig:
     if tf_raw.get("ssh_key_path"):
         tf_raw["ssh_key_path"] = os.path.expanduser(tf_raw["ssh_key_path"])
 
+    obs_raw = merged_config["observability"]
+    obs_raw["storage"] = ObservabilityStorageConfig(
+        **obs_raw.get("storage", {})
+    )
+
     cfg = DeployConfig(
         deploy_mode=merged_config["deploy_mode"],
         repo_url=merged_config["repo_url"],
@@ -280,6 +344,7 @@ def load_config(path: str | Path | None = None) -> DeployConfig:
         logging=LoggingConfig(**merged_config["logging"]),
         timeouts=TimeoutsConfig(**merged_config["timeouts"]),
         concurrency=ConcurrencyConfig(**merged_config["concurrency"]),
+        observability=ObservabilityConfig(**obs_raw),
     )
 
     errors = cfg.validate()

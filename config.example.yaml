@@ -93,6 +93,27 @@ sunbeam:
   # with "single", "multi", or "large" to pin the control-plane layout.
   # resize_topology: auto
 
+# Embedded COS observability (enabled via 'sunbeam enable observability embedded')
+# Added as a new phase after the cluster is deployed.
+observability:
+  enabled: false
+
+  # COS charm channel (configurable). Default "1/stable" matches the snap's
+  # bundled deploy-cos charm base (ubuntu@20.04). Canonical Observability
+  # charms use versioned tracks (no "latest"): "2/stable" ships
+  # ubuntu@24.04, which requires the snap base to be bumped to 24.04.
+  channel: 1/stable
+
+  # Per-charm storage sizes applied at enable time only (resize unsupported).
+  # These map to the manifest keys under
+  # features.observability.embedded.software.charms.<charm>.storage.
+  storage:
+    prometheus: 20G       # prometheus-k8s.storage.database
+    loki_index: 2G        # loki-k8s.storage.active-index-directory
+    loki_chunks: 5G       # loki-k8s.storage.loki-chunks
+    grafana: 1G           # grafana-k8s.storage.database
+    alertmanager: 1G      # alertmanager-k8s.storage.data
+
 # Terraform settings
 terraform:
   # Extra arguments passed to bootstrap.sh / terraform apply
@@ -122,6 +143,8 @@ timeouts:
   cluster_join: 5400       # Cluster join per node
   cluster_resize: 7200     # sunbeam cluster resize after joining control nodes
   terraform_apply: 3600    # Terraform apply timeout
+  observability_enable: 5400  # 'sunbeam enable observability embedded' timeout
+  observability_verify: 900   # Wait for COS active + feature verification
 
 # Concurrency control
 concurrency:

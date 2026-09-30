@@ -138,6 +138,17 @@ uv run sunbeam-deployer deploy --device-ip 10.241.5.22
 | `--tf-arg ARG` | Extra arg for terraform apply (repeatable) |
 | `--cancel-on-failure` | Cancel Testflinger job on deployment failure |
 
+### `deploy observability` — Enable embedded COS on an existing cluster
+
+```bash
+sunbeam-deployer deploy observability [-c CONFIG] [-v] [--device-ip IP | --tf-job-id JOB_ID]
+```
+
+Runs only the observability phase: injects the COS storage settings into the
+manifest, runs `sunbeam enable observability embedded` on the bootstrap node,
+waits for COS to become active and verifies the features. A full `deploy`
+also runs this phase when `observability.enabled: true` is set in the config.
+
 ### `list-jobs` — List Testflinger jobs
 
 ```bash

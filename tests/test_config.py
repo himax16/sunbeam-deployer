@@ -313,3 +313,51 @@ class TestValidation:
         )
         cfg = load_config(yaml_file)
         assert cfg.sunbeam.cluster_node_count == 1
+
+
+class TestObservabilityConfig:
+    def test_observability_disabled_by_default(self) -> None:
+        cfg = load_config(None)
+        assert cfg.observability.enabled is False
+        assert cfg.observability.storage.prometheus == "20G"
+        assert cfg.observability.storage.loki_index == "2G"
+        assert cfg.observability.storage.loki_chunks == "5G"
+        assert cfg.observability.storage.grafana == "1G"
+        assert cfg.observability.storage.alertmanager == "1G"
+
+    def test_observability_timeouts_default(self) -> None:
+        cfg = load_config(None)
+        assert cfg.timeouts.observability_enable == 5400
+        assert cfg.timeouts.observability_verify == 900
+
+    def test_observability_yaml_override_merges_storage(
+        self, tmp_path: Path
+    ) -> None:
+        yaml_file = tmp_path / "config.yaml"
+        yaml_file.write_text(
+            textwrap.dedent("""\
+            observability:
+              enabled: true
+              storage:
+                prometheus: 40G
+        """)
+        )
+        cfg = load_config(yaml_file)
+        assert cfg.observability.enabled is True
+        assert cfg.observability.storage.prometheus == "40G"
+        # Other storage keys keep their defaults
+        assert cfg.observability.storage.loki_index == "2G"
+        assert cfg.observability.storage.grafana == "1G"
+
+    def test_observability_invalid_size(self) -> None:
+        cfg = load_config(None)
+        cfg.observability.enabled = True
+        cfg.observability.storage.prometheus = "abc"
+        errors = cfg.validate()
+        assert any("observability.storage.prometheus" in e for e in errors)
+
+    def test_observability_disabled_skips_validation(self) -> None:
+        cfg = load_config(None)
+        cfg.observability.storage.prometheus = "abc"
+        # Feature disabled — invalid storage size is not reported.
+        assert cfg.validate() == []

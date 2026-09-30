@@ -20,7 +20,13 @@ from sunbeam_deployer.executor import (
 )
 from sunbeam_deployer.logger import LiveDisplay, setup_logging
 from sunbeam_deployer.monitor import DeploymentMonitor, Status
-from sunbeam_deployer.phases import cluster, host_setup, testflinger, vm_deploy
+from sunbeam_deployer.phases import (
+    cluster,
+    host_setup,
+    observability,
+    testflinger,
+    vm_deploy,
+)
 
 console = Console()
 
@@ -79,6 +85,18 @@ click.rich_click.OPTION_GROUPS = {
             ],
         },
     ],
+    "sunbeam-deployer deploy observability": [
+        {
+            "name": "Options",
+            "options": [
+                "--config",
+                "--verbose",
+                "--tf-job-id",
+                "--tf-ssh-key",
+                "--device-ip",
+            ],
+        },
+    ],
     "sunbeam-deployer list-jobs": [
         {
             "name": "Options",
@@ -97,8 +115,8 @@ click.rich_click.OPTION_GROUPS = {
 # ---------------------------------------------------------------------------
 
 
-def _deploy_options(f: Any) -> Any:
-    """Decorator that adds all deploy options to a click command."""
+def _connect_options(f: Any) -> Any:
+    """Decorator that adds connection + config options to a command."""
     f = click.option(
         "-c",
         "--config",
@@ -113,6 +131,28 @@ def _deploy_options(f: Any) -> Any:
         is_flag=True,
         help="Enable verbose terminal output",
     )(f)
+    f = click.option(
+        "--tf-job-id",
+        metavar="JOB_ID",
+        help="Attach to an existing Testflinger job instead of submitting",
+    )(f)
+    f = click.option(
+        "--tf-ssh-key",
+        type=click.Path(exists=True, dir_okay=False),
+        metavar="PATH",
+        help="SSH private key for connecting to the Testflinger machine",
+    )(f)
+    f = click.option(
+        "--device-ip",
+        metavar="IP",
+        help="Skip Testflinger and connect directly to a machine via SSH",
+    )(f)
+    return f
+
+
+def _deploy_options(f: Any) -> Any:
+    """Decorator that adds all deploy options to a click command."""
+    f = _connect_options(f)
     f = click.option(
         "--phase",
         default="all",
@@ -129,26 +169,10 @@ def _deploy_options(f: Any) -> Any:
         help="Enable Testflinger provisioning (submit or attach to a job)",
     )(f)
     f = click.option(
-        "--tf-job-id",
-        metavar="JOB_ID",
-        help="Attach to an existing Testflinger job instead of submitting",
-    )(f)
-    f = click.option(
         "--tf-job-file",
         type=click.Path(exists=True, dir_okay=False),
         metavar="FILE",
         help="Path to a Testflinger job YAML to submit",
-    )(f)
-    f = click.option(
-        "--tf-ssh-key",
-        type=click.Path(exists=True, dir_okay=False),
-        metavar="PATH",
-        help="SSH private key for connecting to the Testflinger machine",
-    )(f)
-    f = click.option(
-        "--device-ip",
-        metavar="IP",
-        help="Skip Testflinger and connect directly to a machine via SSH",
     )(f)
     f = click.option(
         "--snap-channel",
@@ -217,12 +241,23 @@ def cli() -> None:
     """Automated Sunbeam deployment on Testflinger machines."""
 
 
-@cli.command("deploy")
+@cli.group("deploy", invoke_without_command=True)
 @_deploy_options
 @click.pass_context
 def deploy_cmd(ctx: click.Context, **kwargs: Any) -> None:
-    """Deploy Sunbeam."""
-    ctx.exit(_run_deploy(kwargs))
+    """Deploy Sunbeam, or a feature on an existing cluster."""
+    if ctx.invoked_subcommand is None:
+        ctx.exit(_run_deploy(kwargs))
+
+
+@deploy_cmd.command("observability")
+@_connect_options
+@click.pass_context
+def observability_cmd(ctx: click.Context, **kwargs: Any) -> None:
+    """Enable and verify embedded COS observability on an existing cluster."""
+    ctx.exit(
+        _run_deploy(kwargs, phases=["observability"], enable_observability=True)
+    )
 
 
 @cli.command("list-jobs")
@@ -381,8 +416,13 @@ def _reconstruct_infra(
     return infra
 
 
-def _run_deploy(cli_args: dict[str, Any]) -> int:
-    """Core deploy logic shared by top-level and deploy subcommand."""
+def _run_deploy(
+    cli_args: dict[str, Any],
+    *,
+    phases: list[str] | None = None,
+    enable_observability: bool = False,
+) -> int:
+    """Core deploy logic shared by the deploy and observability commands."""
     # Load config
     try:
         cfg = load_config(cli_args.get("config"))
@@ -391,6 +431,8 @@ def _run_deploy(cli_args: dict[str, Any]) -> int:
         return 1
 
     apply_cli_overrides(cfg, cli_args)
+    if enable_observability:
+        cfg.observability.enabled = True
 
     # Re-validate after overrides
     errors = cfg.validate()
@@ -411,21 +453,26 @@ def _run_deploy(cli_args: dict[str, Any]) -> int:
     else:
         logger.info("Snap source: Snapstore channel=%s", cfg.snap.channel)
 
-    # Parse --phase into a list
-    all_phases = ["testflinger", "host-setup", "vm-deploy", "cluster"]
-    phase_raw = cli_args.get("phase", "all")
-    if phase_raw == "all":
-        phases = list(all_phases)
+    # Resolve the phase list: explicit override, else parse --phase
+    if phases is not None:
+        phases = list(phases)
     else:
-        phases = [p.strip() for p in phase_raw.split(",")]
-        invalid = [p for p in phases if p not in all_phases]
-        if invalid:
-            logger.error(
-                "Invalid phase(s): %s. Valid: %s",
-                ", ".join(invalid),
-                ", ".join(all_phases),
-            )
-            return 1
+        all_phases = ["testflinger", "host-setup", "vm-deploy", "cluster"]
+        phase_raw = cli_args.get("phase", "all")
+        if phase_raw == "all":
+            phases = list(all_phases)
+            if cfg.observability.enabled:
+                phases.append("observability")
+        else:
+            phases = [p.strip() for p in phase_raw.split(",")]
+            invalid = [p for p in phases if p not in all_phases]
+            if invalid:
+                logger.error(
+                    "Invalid phase(s): %s. Valid: %s",
+                    ", ".join(invalid),
+                    ", ".join(all_phases),
+                )
+                return 1
     if (
         "testflinger" in phases
         and not cfg.testflinger.enabled
@@ -453,7 +500,11 @@ def _run_deploy(cli_args: dict[str, Any]) -> int:
             if (
                 not failed
                 and infra is None
-                and ("vm-deploy" in phases or "cluster" in phases)
+                and (
+                    "vm-deploy" in phases
+                    or "cluster" in phases
+                    or "observability" in phases
+                )
             ):
                 infra = _reconstruct_infra(cfg, logger)
 
@@ -466,6 +517,11 @@ def _run_deploy(cli_args: dict[str, Any]) -> int:
             if not failed and "cluster" in phases:
                 assert infra is not None
                 cluster.run_phase(cfg, mon, infra)
+
+            # Phase 4: Embedded COS observability
+            if not failed and "observability" in phases:
+                assert infra is not None
+                observability.run_phase(cfg, mon, infra)
 
         except Exception as exc:
             logger.error("Deployment failed: %s", exc)

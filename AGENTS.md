@@ -697,7 +697,7 @@ Based on real deployment data (3-node cluster on Testflinger):
 sunbeam-deployer [--version] COMMAND [ARGS]...
 
 Commands:
-  deploy              Deploy Sunbeam
+  deploy              Deploy Sunbeam, or a feature on an existing cluster
   list-jobs           List Testflinger jobs and their IP addresses
 
 sunbeam-deployer deploy [OPTIONS]
@@ -728,6 +728,11 @@ Behaviour flags:
   --no-manifest              Skip pushing manifest.yaml to VMs
   --tf-arg ARG               Extra terraform arg (repeatable)
   --cancel-on-failure        Auto-cancel Testflinger job if deployment fails
+
+sunbeam-deployer deploy observability [OPTIONS]
+  Enable + verify embedded COS on an existing cluster.
+  Options: -c/--config, -v/--verbose, --tf-job-id, --tf-ssh-key, --device-ip
+  (only attaches to an existing Testflinger job, never submits one)
 
 sunbeam-deployer list-jobs [OPTIONS]
 

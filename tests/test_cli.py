@@ -46,6 +46,20 @@ class TestCliParsing:
         assert "--snap-channel" in result.output
         assert "--cancel-on-failure" in result.output
 
+    def test_deploy_help_lists_observability(self) -> None:
+        """deploy --help lists the observability subcommand."""
+        result = CliRunner().invoke(cli, ["deploy", "--help"])
+        assert result.exit_code == 0
+        assert "observability" in result.output
+
+    def test_deploy_observability_help(self) -> None:
+        """deploy observability --help shows connection options only."""
+        result = CliRunner().invoke(cli, ["deploy", "observability", "--help"])
+        assert result.exit_code == 0
+        assert "--device-ip" in result.output
+        assert "--tf-job-id" in result.output
+        assert "--phase" not in result.output
+
     def test_list_jobs_help(self) -> None:
         """list-jobs --help shows its options."""
         result = CliRunner().invoke(cli, ["list-jobs", "--help"])
@@ -138,6 +152,11 @@ class TestApplyCliOverrides:
         args = self._make_args(accept_defaults=True)
         apply_cli_overrides(cfg, args)
         assert cfg.sunbeam.accept_defaults is True
+
+    def test_observability_disabled_by_default(self) -> None:
+        cfg = load_config(None)
+        apply_cli_overrides(cfg, self._make_args())
+        assert cfg.observability.enabled is False
 
     def test_no_manifest_override(self) -> None:
         cfg = load_config(None)
@@ -270,6 +289,64 @@ class TestMainInvalidPhase:
             result = CliRunner().invoke(cli, ["deploy", "--phase", "badphase"])
 
         assert result.exit_code == 1
+
+
+class TestDeployObservability:
+    @patch("sunbeam_deployer.cli.setup_logging")
+    def test_runs_only_observability_phase(
+        self, mock_logging: MagicMock
+    ) -> None:
+        """deploy observability enables and runs only that phase."""
+        mock_logging.return_value = MagicMock()
+        cfg = load_config(None)
+
+        with (
+            patch("sunbeam_deployer.cli.load_config", return_value=cfg),
+            patch("sunbeam_deployer.cli.wait_for_ssh", return_value=True),
+            patch("sunbeam_deployer.cli.set_remote_target"),
+            patch("sunbeam_deployer.cli.testflinger") as tf_mod,
+            patch("sunbeam_deployer.cli.host_setup") as hs_mod,
+            patch("sunbeam_deployer.cli.cluster") as cl_mod,
+            patch("sunbeam_deployer.cli.observability") as obs_mod,
+            patch(
+                "sunbeam_deployer.phases.host_setup._parse_terraform_outputs",
+                return_value=MagicMock(),
+            ),
+        ):
+            result = CliRunner().invoke(
+                cli,
+                ["deploy", "observability", "--device-ip", "10.0.0.1"],
+            )
+
+        assert result.exit_code == 0, result.output
+        assert cfg.observability.enabled is True
+        obs_mod.run_phase.assert_called_once()
+        tf_mod.run_phase.assert_not_called()
+        hs_mod.run_phase.assert_not_called()
+        cl_mod.run_phase.assert_not_called()
+
+    @patch("sunbeam_deployer.cli.setup_logging")
+    def test_does_not_submit_testflinger_job(
+        self, mock_logging: MagicMock
+    ) -> None:
+        """Testflinger enabled in config without a job id never submits."""
+        mock_logging.return_value = MagicMock()
+        cfg = load_config(None)
+        cfg.testflinger.enabled = True
+        cfg.testflinger.job_id = None
+
+        with (
+            patch("sunbeam_deployer.cli.load_config", return_value=cfg),
+            patch("sunbeam_deployer.cli.testflinger") as tf_mod,
+            patch("sunbeam_deployer.cli.observability"),
+            patch(
+                "sunbeam_deployer.phases.host_setup._parse_terraform_outputs",
+                return_value=MagicMock(),
+            ),
+        ):
+            CliRunner().invoke(cli, ["deploy", "observability"])
+
+        tf_mod.run_phase.assert_not_called()
 
 
 class TestSinglePhaseConnection:
