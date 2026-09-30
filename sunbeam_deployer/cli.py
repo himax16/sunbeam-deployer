@@ -337,6 +337,50 @@ def _prompt_cancel_job(logger: logging.Logger, job_id: str) -> None:
         )
 
 
+def _connect(
+    cfg: DeployConfig,
+    mon: DeploymentMonitor,
+    logger: logging.Logger,
+    phases: list[str],
+) -> tuple[bool, bool]:
+    """Connect to the deployment host; return ``(ok, submitted_job)``.
+
+    Uses Testflinger (submit/attach) or direct SSH. Only the testflinger
+    phase may submit a new job; other phases can only attach to one.
+    """
+    tf = cfg.testflinger
+    if tf.enabled and ("testflinger" in phases or tf.job_id):
+        pre_job_id = tf.job_id
+        testflinger.run_phase(cfg, mon)
+        return (True, not pre_job_id and bool(tf.job_id))
+
+    direct_ip = cfg.device_ip
+    if direct_ip:
+        logger.info("Connecting directly to %s", direct_ip)
+        ssh_user = tf.ssh_user
+        ssh_key = tf.ssh_key_path
+        if not wait_for_ssh(direct_ip, ssh_user, ssh_key, timeout=120):
+            logger.error("Cannot reach %s via SSH", direct_ip)
+            return (False, False)
+        set_remote_target(
+            RemoteTarget(host=direct_ip, user=ssh_user, key_path=ssh_key)
+        )
+    return (True, False)
+
+
+def _reconstruct_infra(
+    cfg: DeployConfig, logger: logging.Logger
+) -> host_setup.InfraInfo:
+    """Rebuild ``InfraInfo`` from existing Terraform outputs."""
+    logger.info("Reconstructing infrastructure info from Terraform outputs…")
+    tmp_mon = DeploymentMonitor()
+    tmp_mon.add_phase(host_setup.PHASE)
+    tmp_mon.start_phase(host_setup.PHASE)
+    infra = host_setup._parse_terraform_outputs(cfg, tmp_mon)
+    tmp_mon.end_phase(host_setup.PHASE, Status.SUCCESS)
+    return infra
+
+
 def _run_deploy(cli_args: dict[str, Any]) -> int:
     """Core deploy logic shared by top-level and deploy subcommand."""
     # Load config
@@ -398,51 +442,20 @@ def _run_deploy(cli_args: dict[str, Any]) -> int:
     ctx = display or nullcontext()
     with ctx:
         try:
-            # Phase 0: Testflinger provisioning (or direct SSH)
-            direct_ip = cfg.device_ip
-
-            if "testflinger" in phases and cfg.testflinger.enabled:
-                pre_job_id = cfg.testflinger.job_id
-                testflinger.run_phase(cfg, mon)
-                if not pre_job_id and cfg.testflinger.job_id:
-                    submitted_job = True
-            elif direct_ip:
-                logger.info("Connecting directly to %s", direct_ip)
-                ssh_user = cfg.testflinger.ssh_user
-                ssh_key = cfg.testflinger.ssh_key_path
-                if not wait_for_ssh(direct_ip, ssh_user, ssh_key, timeout=120):
-                    logger.error("Cannot reach %s via SSH", direct_ip)
-                    failed = True
-                else:
-                    set_remote_target(
-                        RemoteTarget(
-                            host=direct_ip,
-                            user=ssh_user,
-                            key_path=ssh_key,
-                        )
-                    )
+            ok, submitted_job = _connect(cfg, mon, logger, phases)
+            failed = not ok
 
             # Phase 1: Host setup
             if not failed and "host-setup" in phases:
                 infra = host_setup.run_phase(cfg, mon)
 
             # For single-phase runs, reconstruct infra from terraform
-            if infra is None and ("vm-deploy" in phases or "cluster" in phases):
-                logger.info(
-                    "Reconstructing infrastructure info from Terraform outputs…"
-                )
-                from sunbeam_deployer.phases.host_setup import (
-                    PHASE as HS_PHASE,
-                )
-                from sunbeam_deployer.phases.host_setup import (
-                    _parse_terraform_outputs,
-                )
-
-                tmp_mon = DeploymentMonitor()
-                tmp_mon.add_phase(HS_PHASE)
-                tmp_mon.start_phase(HS_PHASE)
-                infra = _parse_terraform_outputs(cfg, tmp_mon)
-                tmp_mon.end_phase(HS_PHASE, Status.SUCCESS)
+            if (
+                not failed
+                and infra is None
+                and ("vm-deploy" in phases or "cluster" in phases)
+            ):
+                infra = _reconstruct_infra(cfg, logger)
 
             # Phase 2: VM deployment
             if not failed and "vm-deploy" in phases:

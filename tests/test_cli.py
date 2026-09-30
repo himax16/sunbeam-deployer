@@ -270,3 +270,50 @@ class TestMainInvalidPhase:
             result = CliRunner().invoke(cli, ["deploy", "--phase", "badphase"])
 
         assert result.exit_code == 1
+
+
+class TestSinglePhaseConnection:
+    """Single-phase runs attach to Testflinger jobs but never submit one."""
+
+    def _invoke(self, cfg: object, args: list[str]) -> tuple:
+        with (
+            patch("sunbeam_deployer.cli.load_config", return_value=cfg),
+            patch("sunbeam_deployer.cli.testflinger") as tf_mod,
+            patch("sunbeam_deployer.cli.cluster") as cl_mod,
+            patch(
+                "sunbeam_deployer.phases.host_setup._parse_terraform_outputs",
+                return_value=MagicMock(),
+            ),
+        ):
+            result = CliRunner().invoke(cli, args)
+        return result, tf_mod, cl_mod
+
+    @patch("sunbeam_deployer.cli.setup_logging")
+    def test_attaches_to_job_for_cluster_phase(
+        self, mock_logging: MagicMock
+    ) -> None:
+        """--tf-job-id with --phase cluster connects via Testflinger."""
+        mock_logging.return_value = MagicMock()
+        cfg = load_config(None)
+
+        result, tf_mod, cl_mod = self._invoke(
+            cfg, ["deploy", "--phase", "cluster", "--tf-job-id", "abc"]
+        )
+
+        assert result.exit_code == 0, result.output
+        tf_mod.run_phase.assert_called_once()
+        cl_mod.run_phase.assert_called_once()
+
+    @patch("sunbeam_deployer.cli.setup_logging")
+    def test_does_not_submit_job_for_cluster_phase(
+        self, mock_logging: MagicMock
+    ) -> None:
+        """Testflinger enabled without a job id never submits a new job."""
+        mock_logging.return_value = MagicMock()
+        cfg = load_config(None)
+        cfg.testflinger.enabled = True
+        cfg.testflinger.job_id = None
+
+        _, tf_mod, _ = self._invoke(cfg, ["deploy", "--phase", "cluster"])
+
+        tf_mod.run_phase.assert_not_called()
