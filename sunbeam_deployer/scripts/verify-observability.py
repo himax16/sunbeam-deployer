@@ -82,6 +82,20 @@ def _find_missing_dashboards(
     return [e for e in expected if not any(e.lower() in t for t in lowered)]
 
 
+def _check_dashboards(url: str, password: str) -> tuple[bool, str]:
+    """Return ``(ok, detail)`` for the documented dashboards in Grafana."""
+    status, body = _get(url, password, "/api/search")
+    if status != 200:
+        return (False, f"HTTP {status}")
+    try:
+        dashboards = json.loads(body)
+    except ValueError:
+        dashboards = []
+    titles = [d.get("title", "") for d in dashboards]
+    missing = _find_missing_dashboards(titles, _EXPECTED_DASHBOARDS)
+    return (not missing, f"missing={missing} found={len(titles)}")
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Verify embedded COS observability features."
@@ -120,23 +134,16 @@ def main() -> int:
     status, body = _get(url, password, "/api/health")
     _record("grafana-health", status == 200, f"HTTP {status}", failures)
 
-    # Dashboards
-    status, body = _get(url, password, "/api/search")
-    titles: list[str] = []
-    missing: list[str] = []
-    if status == 200:
-        try:
-            dashboards = json.loads(body)
-        except ValueError:
-            dashboards = []
-        titles = [d.get("title", "") for d in dashboards]
-        missing = _find_missing_dashboards(titles, _EXPECTED_DASHBOARDS)
-    _record(
-        "dashboards",
-        status == 200 and not missing,
-        f"missing={missing} found={titles} HTTP {status}",
-        failures,
-    )
+    # Dashboards (retry until deadline): charms push them to Grafana over
+    # relations after the apps go active, so they can lag by many minutes.
+    dashboards_ok = False
+    dashboards_detail = "timeout"
+    while True:
+        dashboards_ok, dashboards_detail = _check_dashboards(url, password)
+        if dashboards_ok or time.time() >= deadline:
+            break
+        time.sleep(15)
+    _record("dashboards", dashboards_ok, dashboards_detail, failures)
 
     # Datasources
     prom_uid: str | None = None

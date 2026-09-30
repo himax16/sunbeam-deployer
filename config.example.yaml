@@ -144,7 +144,8 @@ timeouts:
   cluster_resize: 7200     # sunbeam cluster resize after joining control nodes
   terraform_apply: 3600    # Terraform apply timeout
   observability_enable: 5400  # 'sunbeam enable observability embedded' timeout
-  observability_verify: 900   # Wait for COS active + feature verification
+  observability_verify: 1800  # Wait for COS active + feature verification
+                              # (dashboards can lag ~20 min after enable)
 
 # Concurrency control
 concurrency:

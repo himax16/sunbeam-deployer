@@ -319,6 +319,8 @@ def _verify_features(
     with mon.run_step(
         PHASE, "verify-features", "Verify observability features"
     ):
+        # Leave headroom under the step timeout for the script's own setup.
+        script_timeout = max(60, cfg.timeouts.observability_verify - 120)
         push = push_file_to_vm(
             primary.name, str(_VERIFY_SCRIPT), _VERIFY_VM_PATH
         )
@@ -329,7 +331,7 @@ def _verify_features(
 
         result = run_in_vm(
             primary.name,
-            f"python3 {_VERIFY_VM_PATH} --timeout 600",
+            f"python3 {_VERIFY_VM_PATH} --timeout {script_timeout}",
             timeout=cfg.timeouts.observability_verify,
         )
         for line in result.stdout.splitlines():

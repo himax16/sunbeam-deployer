@@ -328,7 +328,7 @@ class TestObservabilityConfig:
     def test_observability_timeouts_default(self) -> None:
         cfg = load_config(None)
         assert cfg.timeouts.observability_enable == 5400
-        assert cfg.timeouts.observability_verify == 900
+        assert cfg.timeouts.observability_verify == 1800
 
     def test_observability_yaml_override_merges_storage(
         self, tmp_path: Path

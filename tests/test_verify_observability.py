@@ -95,3 +95,39 @@ class TestGrafanaAction:
             password, url = verify._grafana_action()
         assert password == "x"
         assert url == "u"
+
+
+class TestCheckDashboards:
+    @staticmethod
+    def _body(titles: list[str]) -> str:
+        return json.dumps([{"title": t} for t in titles])
+
+    def test_all_present(self) -> None:
+        titles = [f"OpenStack {e}" for e in verify._EXPECTED_DASHBOARDS]
+        with patch.object(
+            verify, "_get", return_value=(200, self._body(titles))
+        ):
+            ok, detail = verify._check_dashboards("http://g", "pw")
+        assert ok
+        assert "missing=[]" in detail
+
+    def test_reports_missing(self) -> None:
+        with patch.object(
+            verify,
+            "_get",
+            return_value=(200, self._body(["OpenStack Cloud Usage"])),
+        ):
+            ok, detail = verify._check_dashboards("http://g", "pw")
+        assert not ok
+        assert "Capacity" in detail
+
+    def test_http_error(self) -> None:
+        with patch.object(verify, "_get", return_value=(503, "")):
+            ok, detail = verify._check_dashboards("http://g", "pw")
+        assert not ok
+        assert detail == "HTTP 503"
+
+    def test_bad_json_counts_as_missing(self) -> None:
+        with patch.object(verify, "_get", return_value=(200, "not json")):
+            ok, _ = verify._check_dashboards("http://g", "pw")
+        assert not ok

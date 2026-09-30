@@ -77,7 +77,7 @@ _DEFAULTS: dict[str, Any] = {
         "cluster_resize": 7200,
         "terraform_apply": 3600,
         "observability_enable": 5400,
-        "observability_verify": 900,
+        "observability_verify": 1800,
     },
     "concurrency": {
         "vm_deploy": 2,

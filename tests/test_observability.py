@@ -374,6 +374,36 @@ class TestWaitCosActive:
             observability._wait_cos_active(cfg, mon, _make_node("bm0"))
 
 
+class TestVerifyFeatures:
+    @staticmethod
+    def _run(verify_seconds: int) -> MagicMock:
+        cfg = _make_cfg()
+        cfg.timeouts.observability_verify = verify_seconds
+        mon = _make_mon()
+        with (
+            patch(
+                "sunbeam_deployer.phases.observability.push_file_to_vm",
+                return_value=MagicMock(ok=True),
+            ),
+            patch(
+                "sunbeam_deployer.phases.observability.run_in_vm",
+                return_value=MagicMock(ok=True, stdout="PASS x\n"),
+            ) as mock_run,
+        ):
+            observability._verify_features(cfg, mon, _make_node("bm0"))
+        return mock_run
+
+    def test_script_timeout_derived_from_config(self) -> None:
+        """The script gets the step timeout minus a fixed headroom."""
+        mock_run = self._run(1800)
+        assert "--timeout 1680" in mock_run.call_args.args[1]
+        assert mock_run.call_args.kwargs["timeout"] == 1800
+
+    def test_script_timeout_has_a_floor(self) -> None:
+        mock_run = self._run(100)
+        assert "--timeout 60" in mock_run.call_args.args[1]
+
+
 # ---------------------------------------------------------------------------
 # run_phase
 # ---------------------------------------------------------------------------
