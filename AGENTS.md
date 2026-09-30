@@ -84,8 +84,9 @@ sunbeam-deployer/            # Project root
 │   │   ├── host_setup.py    # Phase 1
 │   │   ├── vm_deploy.py     # Phase 2
 │   │   └── cluster.py       # Phase 3
-│   └── scripts/
-│       └── host-setup.sh    # Standalone bash script for Phase 1
+│   ├── scripts/
+│   │   └── host-setup.sh    # Standalone bash script for Phase 1
+│   └── testing/             # Live Playwright tests (`testing` command)
 ├── config.example.yaml      # Reference configuration
 └── pyproject.toml           # Project metadata
 ```
@@ -311,7 +312,6 @@ These are real bugs discovered during live testing:
 
 - Branch naming: `<type>/<short-description>` (e.g. `fix/cluster-join-syntax`, `feat/maas-support`)
 - Commit messages: imperative mood, concise first line. Detail in body if needed.
-- Always include: `Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`
 - Keep changes scoped. Do not mix refactors with fixes.
 - Run all verification checks before committing.
 - Summarize what was validated in PR descriptions.
@@ -698,6 +698,7 @@ sunbeam-deployer [--version] COMMAND [ARGS]...
 
 Commands:
   deploy              Deploy Sunbeam, or a feature on an existing cluster
+  testing             Run live feature tests against a deployed cluster
   list-jobs           List Testflinger jobs and their IP addresses
 
 sunbeam-deployer deploy [OPTIONS]
@@ -733,6 +734,14 @@ sunbeam-deployer deploy observability [OPTIONS]
   Enable + verify embedded COS on an existing cluster.
   Options: -c/--config, -v/--verbose, --tf-job-id, --tf-ssh-key, --device-ip
   (only attaches to an existing Testflinger job, never submits one)
+
+sunbeam-deployer testing observability [OPTIONS] [-- PYTEST_ARGS...]
+  Playwright tests for the Grafana dashboards (needs the `testing` extra:
+  uv sync --extra testing && uv run playwright install chromium).
+  Options: connection options above, plus
+  --headed                   Show the browser window
+  --artifacts-dir DIR        Screenshots + report.xml (default:
+                             ~/.local/share/sunbeam-deployer/screenshots/<ts>)
 
 sunbeam-deployer list-jobs [OPTIONS]
 

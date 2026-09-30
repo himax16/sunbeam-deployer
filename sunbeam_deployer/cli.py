@@ -97,6 +97,20 @@ click.rich_click.OPTION_GROUPS = {
             ],
         },
     ],
+    "sunbeam-deployer testing observability": [
+        {
+            "name": "Options",
+            "options": [
+                "--config",
+                "--verbose",
+                "--tf-job-id",
+                "--tf-ssh-key",
+                "--device-ip",
+                "--headed",
+                "--artifacts-dir",
+            ],
+        },
+    ],
     "sunbeam-deployer list-jobs": [
         {
             "name": "Options",
@@ -260,6 +274,42 @@ def observability_cmd(ctx: click.Context, **kwargs: Any) -> None:
     )
 
 
+@cli.group("testing")
+def testing_cmd() -> None:
+    """Run live feature tests against a deployed cluster."""
+
+
+@testing_cmd.command("observability")
+@_connect_options
+@click.option(
+    "--headed",
+    is_flag=True,
+    help="Show the browser window while testing",
+)
+@click.option(
+    "--artifacts-dir",
+    metavar="DIR",
+    help=(
+        "Local directory for screenshots and report.xml (default: "
+        "~/.local/share/sunbeam-deployer/screenshots/<timestamp>)"
+    ),
+)
+@click.argument("pytest_args", nargs=-1, type=click.UNPROCESSED)
+@click.pass_context
+def testing_observability_cmd(
+    ctx: click.Context,
+    headed: bool,
+    artifacts_dir: str | None,
+    pytest_args: tuple[str, ...],
+    **kwargs: Any,
+) -> None:
+    """Test the Grafana dashboards with Playwright.
+
+    Extra arguments after "--" are passed to pytest.
+    """
+    ctx.exit(_run_testing(kwargs, headed, artifacts_dir, pytest_args))
+
+
 @cli.command("list-jobs")
 @click.option(
     "-v",
@@ -414,6 +464,52 @@ def _reconstruct_infra(
     infra = host_setup._parse_terraform_outputs(cfg, tmp_mon)
     tmp_mon.end_phase(host_setup.PHASE, Status.SUCCESS)
     return infra
+
+
+def _run_testing(
+    cli_args: dict[str, Any],
+    headed: bool,
+    artifacts_dir: str | None,
+    pytest_args: tuple[str, ...],
+) -> int:
+    """Connect to the cluster and run the observability browser tests."""
+    from sunbeam_deployer.testing import runner
+
+    missing = runner.missing_dependencies()
+    if missing:
+        console.print(
+            f"[red]Missing test dependencies: {', '.join(missing)}[/]\n"
+            "Install with: [cyan]uv sync --extra testing && "
+            "uv run playwright install chromium[/]"
+        )
+        return 1
+
+    try:
+        cfg = load_config(cli_args.get("config"))
+    except Exception as exc:
+        console.print(f"[red]Error loading config: {exc}[/]")
+        return 1
+    apply_cli_overrides(cfg, cli_args)
+    logger = setup_logging(cfg.logging.log_dir, cfg.logging.verbose)
+
+    mon = DeploymentMonitor()
+    try:
+        ok, _ = _connect(cfg, mon, logger, phases=[])
+        if not ok:
+            return 1
+        infra = _reconstruct_infra(cfg, logger)
+        if not infra.nodes:
+            logger.error("No compute nodes found in Terraform outputs")
+            return 1
+        return runner.run_observability_tests(
+            infra.nodes[0].name,
+            artifacts_dir=artifacts_dir,
+            headed=headed,
+            pytest_args=pytest_args,
+        )
+    except Exception as exc:
+        logger.error("Testing failed: %s", exc)
+        return 1
 
 
 def _run_deploy(

@@ -9,6 +9,12 @@ dependencies = [
     "rich-click>=1.0",
 ]
 
+[project.optional-dependencies]
+testing = [
+    "pytest>=9.0",
+    "pytest-playwright>=0.7",
+]
+
 [project.scripts]
 sunbeam-deployer = "sunbeam_deployer.__main__:main"
 

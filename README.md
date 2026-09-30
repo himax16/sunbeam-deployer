@@ -86,7 +86,7 @@ For each VM (bounded parallelism, default 2):
 
 ## CLI Usage
 
-The CLI has two subcommands: `deploy` (the default) and `list-jobs`.
+The CLI has three command groups: `deploy`, `testing` and `list-jobs`.
 
 ### `deploy` — Run a Sunbeam deployment
 
@@ -148,6 +148,26 @@ Runs only the observability phase: injects the COS storage settings into the
 manifest, runs `sunbeam enable observability embedded` on the bootstrap node,
 waits for COS to become active and verifies the features. A full `deploy`
 also runs this phase when `observability.enabled: true` is set in the config.
+
+### `testing observability` — Browser tests for the Grafana dashboards
+
+```bash
+uv sync --extra testing && uv run playwright install chromium   # one-off
+sunbeam-deployer testing observability [--device-ip IP | --tf-job-id JOB_ID] \
+    [--headed] [--artifacts-dir DIR] [-- PYTEST_ARGS...]
+```
+
+Uses Playwright to walk through the Grafana checks from the
+[observability docs](https://canonical.com/openstack/docs/latest/how-to/features/observability/):
+admin login (and rejection of a bad password), each OpenStack dashboard is
+listed and renders without panel errors, and the Service Overview shows live
+data. The Grafana admin password is read from the `grafana/leader` action and
+Grafana is reached through an SSH port-forward to the deployment host.
+
+Screenshots of every page and a JUnit report (`report.xml`) are saved to
+`~/.local/share/sunbeam-deployer/screenshots/<timestamp>/` (override with
+`--artifacts-dir`); failures also save to `failures/` in that folder. The
+per-test outcome and summary are also written to the deployer log file.
 
 ### `list-jobs` — List Testflinger jobs
 

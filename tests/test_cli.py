@@ -24,6 +24,7 @@ class TestCliParsing:
         assert "Commands" in result.output
         assert "deploy" in result.output
         assert "list-jobs" in result.output
+        assert "testing" in result.output
 
     def test_no_args_shows_help(self) -> None:
         """No subcommand -> help displayed, exit 2 (missing command)."""
@@ -59,6 +60,14 @@ class TestCliParsing:
         assert "--device-ip" in result.output
         assert "--tf-job-id" in result.output
         assert "--phase" not in result.output
+
+    def test_testing_observability_help(self) -> None:
+        """testing observability --help shows its options."""
+        result = CliRunner().invoke(cli, ["testing", "observability", "--help"])
+        assert result.exit_code == 0
+        assert "--device-ip" in result.output
+        assert "--headed" in result.output
+        assert "--artifacts-dir" in result.output
 
     def test_list_jobs_help(self) -> None:
         """list-jobs --help shows its options."""
