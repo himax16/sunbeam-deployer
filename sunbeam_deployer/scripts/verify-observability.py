@@ -29,14 +29,14 @@ _EXPECTED_DASHBOARDS = (
 )
 
 
-def _grafana_action() -> tuple[str, str]:
+def _grafana_action(model: str) -> tuple[str, str]:
     """Return ``(admin-password, url)`` from the grafana leader action."""
     proc = subprocess.run(
         [
             "juju",
             "run",
             "-m",
-            "observability",
+            model,
             "grafana/leader",
             "get-admin-password",
             "--format",
@@ -98,7 +98,12 @@ def _check_dashboards(url: str, password: str) -> tuple[bool, str]:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Verify embedded COS observability features."
+        description="Verify COS observability features."
+    )
+    parser.add_argument(
+        "--model",
+        default="observability",
+        help="Juju model hosting the COS stack (default: observability)",
     )
     parser.add_argument(
         "--timeout",
@@ -122,7 +127,7 @@ def main() -> int:
     deadline = time.time() + args.timeout
 
     try:
-        password, url = _grafana_action()
+        password, url = _grafana_action(args.model)
     except Exception as exc:
         print(f"FAIL grafana-admin-password: {exc}")
         return 1

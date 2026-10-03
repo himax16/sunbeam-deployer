@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import base64
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
-from sunbeam_deployer.config import DeployConfig
+import yaml
+
+from sunbeam_deployer.config import DeployConfig, deep_merge
 from sunbeam_deployer.executor import (
     push_file_to_vm,
     run_host,
@@ -33,6 +37,9 @@ def run_phase(
     mon.start_phase(PHASE)
 
     try:
+        if cfg.sunbeam.manifest_overrides:
+            _merge_manifest_overrides(cfg, mon, infra)
+
         failed_nodes: list[str] = []
 
         with ThreadPoolExecutor(max_workers=cfg.concurrency.vm_deploy) as pool:
@@ -58,6 +65,58 @@ def run_phase(
     except Exception as exc:
         mon.end_phase(PHASE, Status.FAILED, error=str(exc))
         raise
+
+
+def _merge_manifest_overrides(
+    cfg: DeployConfig,
+    mon: DeploymentMonitor,
+    infra: InfraInfo,
+) -> None:
+    """Merge a local manifest override file into the host's manifest.
+
+    Used to inject per-charm channel overrides (e.g. 2026.1/edge charms)
+    into the Terraform-generated manifest before it is pushed to the VMs.
+    Without this the TF variables fall back to uninstallable defaults.
+    """
+    assert cfg.sunbeam.manifest_overrides is not None
+    override_path = Path(cfg.sunbeam.manifest_overrides).expanduser()
+
+    with mon.run_step(
+        PHASE, "merge-manifest-overrides", "Merge manifest overrides"
+    ):
+        result = run_host(f"cat {infra.manifest_path}", stream=False)
+        if not result.ok:
+            raise RuntimeError(
+                f"Manifest not found at {infra.manifest_path} — cannot merge "
+                "overrides"
+            )
+        manifest = yaml.safe_load(result.stdout) or {}
+        try:
+            overrides = yaml.safe_load(override_path.read_text()) or {}
+        except OSError as exc:
+            raise RuntimeError(
+                f"Failed to read manifest overrides {override_path}: {exc}"
+            ) from exc
+
+        if not isinstance(manifest, dict) or not isinstance(overrides, dict):
+            raise RuntimeError("manifest and overrides must be YAML mappings")
+
+        merged = deep_merge(manifest, overrides)
+        dumped = yaml.safe_dump(merged)
+        b64 = base64.b64encode(dumped.encode()).decode()
+        write = run_host(
+            f"echo {b64} | base64 -d > {infra.manifest_path}",
+            stream=False,
+        )
+        if not write.ok:
+            raise RuntimeError(
+                f"Failed to write merged manifest to {infra.manifest_path}"
+            )
+        log.info(
+            "Merged manifest overrides from %s into %s",
+            override_path,
+            infra.manifest_path,
+        )
 
 
 def _deploy_single_vm(

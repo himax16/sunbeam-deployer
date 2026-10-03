@@ -22,6 +22,7 @@ from sunbeam_deployer.logger import LiveDisplay, setup_logging
 from sunbeam_deployer.monitor import DeploymentMonitor, Status
 from sunbeam_deployer.phases import (
     cluster,
+    external_observability,
     host_setup,
     observability,
     testflinger,
@@ -172,8 +173,8 @@ def _deploy_options(f: Any) -> Any:
         default="all",
         help=(
             "Comma-separated list of phases to run: "
-            "testflinger,host-setup,vm-deploy,cluster "
-            "or 'all' for everything (default: all)"
+            "testflinger,host-setup,vm-deploy,cluster,observability,"
+            "external-observability or 'all' for everything (default: all)"
         ),
     )(f)
     f = click.option(
@@ -274,6 +275,20 @@ def observability_cmd(ctx: click.Context, **kwargs: Any) -> None:
     )
 
 
+@deploy_cmd.command("external-observability")
+@_connect_options
+@click.pass_context
+def external_observability_cmd(ctx: click.Context, **kwargs: Any) -> None:
+    """Deploy a COS stack in a new model and attach it as external."""
+    ctx.exit(
+        _run_deploy(
+            kwargs,
+            phases=["external-observability"],
+            enable_external_observability=True,
+        )
+    )
+
+
 @cli.group("testing")
 def testing_cmd() -> None:
     """Run live feature tests against a deployed cluster."""
@@ -294,12 +309,23 @@ def testing_cmd() -> None:
         "~/.local/share/sunbeam-deployer/screenshots/<timestamp>)"
     ),
 )
+@click.option(
+    "--model",
+    metavar="MODEL",
+    default="observability",
+    show_default=True,
+    help=(
+        "Juju model hosting the COS stack "
+        "(default: observability; use external-cos for external COS)"
+    ),
+)
 @click.argument("pytest_args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
 def testing_observability_cmd(
     ctx: click.Context,
     headed: bool,
     artifacts_dir: str | None,
+    model: str,
     pytest_args: tuple[str, ...],
     **kwargs: Any,
 ) -> None:
@@ -307,7 +333,7 @@ def testing_observability_cmd(
 
     Extra arguments after "--" are passed to pytest.
     """
-    ctx.exit(_run_testing(kwargs, headed, artifacts_dir, pytest_args))
+    ctx.exit(_run_testing(kwargs, headed, artifacts_dir, model, pytest_args))
 
 
 @cli.command("list-jobs")
@@ -470,6 +496,7 @@ def _run_testing(
     cli_args: dict[str, Any],
     headed: bool,
     artifacts_dir: str | None,
+    model: str,
     pytest_args: tuple[str, ...],
 ) -> int:
     """Connect to the cluster and run the observability browser tests."""
@@ -503,6 +530,7 @@ def _run_testing(
             return 1
         return runner.run_observability_tests(
             infra.nodes[0].name,
+            model=model,
             artifacts_dir=artifacts_dir,
             headed=headed,
             pytest_args=pytest_args,
@@ -517,6 +545,7 @@ def _run_deploy(
     *,
     phases: list[str] | None = None,
     enable_observability: bool = False,
+    enable_external_observability: bool = False,
 ) -> int:
     """Core deploy logic shared by the deploy and observability commands."""
     # Load config
@@ -529,6 +558,8 @@ def _run_deploy(
     apply_cli_overrides(cfg, cli_args)
     if enable_observability:
         cfg.observability.enabled = True
+    if enable_external_observability:
+        cfg.observability.external.enabled = True
 
     # Re-validate after overrides
     errors = cfg.validate()
@@ -550,15 +581,24 @@ def _run_deploy(
         logger.info("Snap source: Snapstore channel=%s", cfg.snap.channel)
 
     # Resolve the phase list: explicit override, else parse --phase
+    all_phases = [
+        "testflinger",
+        "host-setup",
+        "vm-deploy",
+        "cluster",
+        "observability",
+        "external-observability",
+    ]
     if phases is not None:
         phases = list(phases)
     else:
-        all_phases = ["testflinger", "host-setup", "vm-deploy", "cluster"]
         phase_raw = cli_args.get("phase", "all")
         if phase_raw == "all":
-            phases = list(all_phases)
+            phases = ["testflinger", "host-setup", "vm-deploy", "cluster"]
             if cfg.observability.enabled:
                 phases.append("observability")
+            if cfg.observability.external.enabled:
+                phases.append("external-observability")
         else:
             phases = [p.strip() for p in phase_raw.split(",")]
             invalid = [p for p in phases if p not in all_phases]
@@ -600,6 +640,7 @@ def _run_deploy(
                     "vm-deploy" in phases
                     or "cluster" in phases
                     or "observability" in phases
+                    or "external-observability" in phases
                 )
             ):
                 infra = _reconstruct_infra(cfg, logger)
@@ -618,6 +659,11 @@ def _run_deploy(
             if not failed and "observability" in phases:
                 assert infra is not None
                 observability.run_phase(cfg, mon, infra)
+
+            # Phase 5: External COS observability
+            if not failed and "external-observability" in phases:
+                assert infra is not None
+                external_observability.run_phase(cfg, mon, infra)
 
         except Exception as exc:
             logger.error("Deployment failed: %s", exc)

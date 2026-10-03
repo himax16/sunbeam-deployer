@@ -11,12 +11,12 @@ from sunbeam_deployer.config import (
     DeployConfig,
     SnapConfig,
     TestflingerConfig,
-    _deep_merge,
+    deep_merge,
     load_config,
 )
 
 # ---------------------------------------------------------------------------
-# _deep_merge
+# deep_merge
 # ---------------------------------------------------------------------------
 
 
@@ -24,53 +24,53 @@ class TestDeepMerge:
     def test_simple_override(self) -> None:
         base = {"a": 1, "b": 2}
         override = {"b": 99}
-        result = _deep_merge(base, override)
+        result = deep_merge(base, override)
         assert result == {"a": 1, "b": 99}
 
     def test_nested_merge(self) -> None:
         base = {"x": {"y": 1, "z": 2}}
         override = {"x": {"z": 99}}
-        result = _deep_merge(base, override)
+        result = deep_merge(base, override)
         assert result == {"x": {"y": 1, "z": 99}}
 
     def test_add_new_key(self) -> None:
         base = {"a": 1}
         override = {"b": 2}
-        result = _deep_merge(base, override)
+        result = deep_merge(base, override)
         assert result == {"a": 1, "b": 2}
 
     def test_does_not_mutate_base(self) -> None:
         base = {"x": {"y": 1}}
         override = {"x": {"y": 2}}
-        _deep_merge(base, override)
+        deep_merge(base, override)
         assert base == {"x": {"y": 1}}
 
     def test_override_replaces_dict_with_scalar(self) -> None:
         base = {"x": {"nested": True}}
         override = {"x": "flat"}
-        result = _deep_merge(base, override)
+        result = deep_merge(base, override)
         assert result == {"x": "flat"}
 
     def test_override_replaces_scalar_with_dict(self) -> None:
         base = {"x": "flat"}
         override = {"x": {"nested": True}}
-        result = _deep_merge(base, override)
+        result = deep_merge(base, override)
         assert result == {"x": {"nested": True}}
 
     def test_empty_override(self) -> None:
         base = {"a": 1, "b": {"c": 2}}
-        result = _deep_merge(base, {})
+        result = deep_merge(base, {})
         assert result == base
 
     def test_empty_base(self) -> None:
         override = {"a": 1}
-        result = _deep_merge({}, override)
+        result = deep_merge({}, override)
         assert result == {"a": 1}
 
     def test_deeply_nested(self) -> None:
         base = {"a": {"b": {"c": {"d": 1, "e": 2}}}}
         override = {"a": {"b": {"c": {"e": 99}}}}
-        result = _deep_merge(base, override)
+        result = deep_merge(base, override)
         assert result == {"a": {"b": {"c": {"d": 1, "e": 99}}}}
 
 

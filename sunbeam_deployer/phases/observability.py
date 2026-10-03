@@ -11,7 +11,7 @@ from pathlib import Path
 
 import yaml
 
-from sunbeam_deployer.config import DeployConfig, _deep_merge
+from sunbeam_deployer.config import DeployConfig, deep_merge
 from sunbeam_deployer.executor import (
     push_file_to_vm,
     run_host,
@@ -168,7 +168,7 @@ def _configure_manifest(
             log.info("Keeping existing observability segment in manifest")
             return
 
-        merged = _deep_merge(manifest, _observability_manifest_block(cfg))
+        merged = deep_merge(manifest, _observability_manifest_block(cfg))
         dumped = yaml.safe_dump(merged)
         b64 = base64.b64encode(dumped.encode()).decode()
         write = run_host(

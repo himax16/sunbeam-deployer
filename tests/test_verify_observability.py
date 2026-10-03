@@ -74,9 +74,10 @@ class TestGrafanaAction:
         with patch.object(
             verify.subprocess, "run", return_value=mock_proc
         ) as mock_run:
-            password, url = verify._grafana_action()
+            password, url = verify._grafana_action("external-cos")
             args = mock_run.call_args.args[0]
             assert "get-admin-password" in args
+            assert "external-cos" in args
 
         assert password == "secretpw"
         assert url == "http://10.0.0.1/observability-grafana"
@@ -92,7 +93,7 @@ class TestGrafanaAction:
             "run",
             return_value=MagicMock(stdout=sample),
         ):
-            password, url = verify._grafana_action()
+            password, url = verify._grafana_action("observability")
         assert password == "x"
         assert url == "u"
 

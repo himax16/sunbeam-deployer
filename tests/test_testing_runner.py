@@ -28,6 +28,12 @@ class TestGrafanaCredentials:
         assert mock_vm.call_args.kwargs["stream"] is False
 
     @patch("sunbeam_deployer.testing.runner.run_in_vm")
+    def test_uses_model_in_command(self, mock_vm: MagicMock) -> None:
+        mock_vm.return_value = MagicMock(ok=True, stdout=_ACTION_OUT)
+        runner.grafana_credentials("bm0", model="external-cos")
+        assert "-m external-cos" in mock_vm.call_args.args[1]
+
+    @patch("sunbeam_deployer.testing.runner.run_in_vm")
     def test_action_failure_raises(self, mock_vm: MagicMock) -> None:
         mock_vm.return_value = MagicMock(ok=False, stdout="boom")
         with pytest.raises(RuntimeError, match="admin password"):

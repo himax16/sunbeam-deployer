@@ -47,6 +47,7 @@ _DEFAULTS: dict[str, Any] = {
         "bootstrap_extra_args": [],
         "cluster_node_count": 0,
         "resize_topology": "auto",
+        "manifest_overrides": None,
     },
     "observability": {
         "enabled": False,
@@ -57,6 +58,12 @@ _DEFAULTS: dict[str, Any] = {
             "loki_chunks": "5G",
             "grafana": "1G",
             "alertmanager": "1G",
+        },
+        "external": {
+            "enabled": False,
+            "controller": None,
+            "model": "external-cos",
+            "channel": "latest/stable",
         },
     },
     "terraform": {
@@ -85,7 +92,7 @@ _DEFAULTS: dict[str, Any] = {
 }
 
 
-def _deep_merge(base: dict, override: dict) -> dict:
+def deep_merge(base: dict, override: dict) -> dict:
     """Recursively merge *override* into a copy of *base*."""
     result = copy.deepcopy(base)
     for key, value in override.items():
@@ -94,7 +101,7 @@ def _deep_merge(base: dict, override: dict) -> dict:
             and isinstance(result[key], dict)
             and isinstance(value, dict)
         ):
-            result[key] = _deep_merge(result[key], value)
+            result[key] = deep_merge(result[key], value)
         else:
             result[key] = copy.deepcopy(value)
     return result
@@ -146,6 +153,7 @@ class SunbeamConfig:
     bootstrap_extra_args: list[str]
     cluster_node_count: int
     resize_topology: str = "auto"
+    manifest_overrides: str | None = None
 
     def validate(self) -> list[str]:
         errors: list[str] = []
@@ -163,6 +171,13 @@ class SunbeamConfig:
                 "'auto', 'single', 'multi', 'large', "
                 f"got '{self.resize_topology}'"
             )
+        if self.manifest_overrides:
+            p = Path(os.path.expanduser(self.manifest_overrides))
+            if not p.is_file():
+                errors.append(
+                    "sunbeam.manifest_overrides does not exist or is not a "
+                    f"file: {self.manifest_overrides}"
+                )
         return errors
 
 
@@ -196,15 +211,38 @@ class ObservabilityStorageConfig:
 
 
 @dataclass
+class ExternalObservabilityConfig:
+    enabled: bool = False
+    controller: str | None = None  # None = cluster's own controller
+    model: str = "external-cos"
+    channel: str = "latest/stable"
+
+    def validate(self) -> list[str]:
+        errors: list[str] = []
+        if not self.enabled:
+            return errors
+        if not self.model:
+            errors.append("observability.external.model cannot be empty")
+        if not self.channel:
+            errors.append("observability.external.channel cannot be empty")
+        return errors
+
+
+@dataclass
 class ObservabilityConfig:
     enabled: bool = False
     channel: str = "1/stable"
     storage: ObservabilityStorageConfig = field(
         default_factory=ObservabilityStorageConfig
     )
+    external: ExternalObservabilityConfig = field(
+        default_factory=ExternalObservabilityConfig
+    )
 
     def validate(self) -> list[str]:
-        return self.storage.validate() if self.enabled else []
+        errors: list[str] = self.storage.validate() if self.enabled else []
+        errors.extend(self.external.validate())
+        return errors
 
 
 @dataclass
@@ -317,7 +355,7 @@ def load_config(path: str | Path | None = None) -> DeployConfig:
         with open(path, encoding="utf-8") as fh:
             raw = yaml.safe_load(fh) or {}
 
-    merged_config = _deep_merge(_DEFAULTS, raw)
+    merged_config = deep_merge(_DEFAULTS, raw)
 
     tf_raw = merged_config["testflinger"]
     if tf_raw.get("job_file"):
@@ -328,6 +366,9 @@ def load_config(path: str | Path | None = None) -> DeployConfig:
     obs_raw = merged_config["observability"]
     obs_raw["storage"] = ObservabilityStorageConfig(
         **obs_raw.get("storage", {})
+    )
+    obs_raw["external"] = ExternalObservabilityConfig(
+        **obs_raw.get("external", {})
     )
 
     cfg = DeployConfig(

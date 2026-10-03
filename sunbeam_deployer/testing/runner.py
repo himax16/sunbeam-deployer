@@ -81,12 +81,13 @@ def missing_dependencies() -> list[str]:
     ]
 
 
-def grafana_credentials(vm_name: str) -> tuple[str, str]:
+def grafana_credentials(
+    vm_name: str, model: str = "observability"
+) -> tuple[str, str]:
     """Return ``(url, admin-password)`` from the grafana leader action."""
     result = run_in_vm(
         vm_name,
-        "juju run -m observability grafana/leader get-admin-password "
-        "--format json",
+        f"juju run -m {model} grafana/leader get-admin-password --format json",
         stream=False,
         timeout=180,
     )
@@ -175,12 +176,13 @@ def reachable_url(url: str) -> Iterator[str]:
 def run_observability_tests(
     vm_name: str,
     *,
+    model: str = "observability",
     artifacts_dir: str | None = None,
     headed: bool = False,
     pytest_args: tuple[str, ...] = (),
 ) -> int:
     """Run the Grafana dashboard tests; return pytest's exit code."""
-    url, password = grafana_credentials(vm_name)
+    url, password = grafana_credentials(vm_name, model)
     log.info("Grafana URL: %s", url)
 
     # Local path (screenshots are saved on the agent machine).

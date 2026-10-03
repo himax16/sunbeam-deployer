@@ -149,13 +149,46 @@ manifest, runs `sunbeam enable observability embedded` on the bootstrap node,
 waits for COS to become active and verifies the features. A full `deploy`
 also runs this phase when `observability.enabled: true` is set in the config.
 
+### `deploy external-observability` — Attach a standalone COS stack as external
+
+```bash
+sunbeam-deployer deploy external-observability \
+    [--device-ip IP | --tf-job-id JOB_ID] [-c CONFIG]
+```
+
+Deploys a standalone COS Lite stack, offers its Grafana / Prometheus / Loki
+endpoints, and attaches them via `sunbeam enable observability external`,
+then verifies the dashboards/metrics/logs. Two modes, chosen by
+`observability.external.controller`:
+
+- `null` (default): deploy COS in a **new model on the cluster's own
+  controller** (`sunbeam-controller`) — no bootstrap.
+- `cos-controller`: bootstrap a **dedicated controller** of that name, deploy
+  COS there, and register it on the cluster (the documented "Connect to an
+  existing COS" flow).
+
+A full `deploy` additionally runs this phase when
+`observability.external.enabled: true` is set.
+
+Config (`observability.external`):
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `enabled` | `false` | Enable the phase on a full `deploy` |
+| `controller` | `null` | `null` = cluster's own controller; a name = dedicated controller |
+| `model` | `external-cos` | Juju model hosting the COS stack |
+| `channel` | `latest/stable` | cos-lite bundle channel |
+
 ### `testing observability` — Browser tests for the Grafana dashboards
 
 ```bash
 uv sync --extra testing && uv run playwright install chromium   # one-off
 sunbeam-deployer testing observability [--device-ip IP | --tf-job-id JOB_ID] \
-    [--headed] [--artifacts-dir DIR] [-- PYTEST_ARGS...]
+    [--model MODEL] [--headed] [--artifacts-dir DIR] [-- PYTEST_ARGS...]
 ```
+
+Run against the external COS stack with `--model external-cos` (the Grafana
+credentials are read from that model's `grafana/leader` action).
 
 Uses Playwright to walk through the Grafana checks from the
 [observability docs](https://canonical.com/openstack/docs/latest/how-to/features/observability/):
@@ -264,6 +297,7 @@ Key settings:
 | `snap.channel` | `2026.1/edge` | Snap store channel |
 | `snap.install_method` | `dangerous` | `dangerous` or `try` (for local installs) |
 | `sunbeam.manifest` | `true` | Push Terraform-generated manifest to VMs |
+| `sunbeam.manifest_overrides` | `null` | Local YAML deep-merged into the manifest (per-charm channels for edge snaps) |
 | `concurrency.vm_deploy` | `2` | Max VMs deployed in parallel |
 | `timeouts.cluster_bootstrap` | `7200` | Bootstrap timeout in seconds |
 

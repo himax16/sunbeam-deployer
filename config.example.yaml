@@ -93,6 +93,12 @@ sunbeam:
   # with "single", "multi", or "large" to pin the control-plane layout.
   # resize_topology: auto
 
+  # Local YAML file whose contents are deep-merged into the Terraform-generated
+  # manifest before it is pushed to the VMs.
+  # Required for edge snaps whose charm channels fall back to uninstallable
+  # defaults: e.g. manifest_overrides: manifest.2026.1-edge-overrides.yaml
+  # manifest_overrides: null
+
 # Embedded COS observability (enabled via 'sunbeam enable observability embedded')
 # Added as a new phase after the cluster is deployed.
 observability:
@@ -113,6 +119,25 @@ observability:
     loki_chunks: 5G       # loki-k8s.storage.loki-chunks
     grafana: 1G           # grafana-k8s.storage.database
     alertmanager: 1G      # alertmanager-k8s.storage.data
+
+  # External COS observability: deploy a standalone COS Lite stack, offer its
+  # endpoints, and attach via 'sunbeam enable observability external'.
+  external:
+    enabled: false
+
+    # The Juju controller hosting the external COS stack — either:
+    #   null            -> deploy COS in a new model on the cluster's OWN
+    #                      controller (sunbeam-controller). No bootstrap.
+    #   <name>          -> bootstrap a DEDICATED controller of that name,
+    #                      deploy COS there, and register it on the cluster
+    #                      (the documented "connect to an existing COS" flow).
+    controller: null
+
+    # Juju model hosting the COS stack (named to make its purpose obvious).
+    model: external-cos
+
+    # cos-lite bundle channel (charm tracks are pinned inside the bundle).
+    channel: latest/stable
 
 # Terraform settings
 terraform:
