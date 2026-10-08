@@ -402,114 +402,20 @@ class TestEnableExternalObservability:
         )
 
     @patch("sunbeam_deployer.phases.external_observability.run_in_vm")
-    def test_tolerates_enable_error(self, run_in_vm: MagicMock) -> None:
+    def test_enable_error_raises(self, run_in_vm: MagicMock) -> None:
         cfg = _make_cfg()
         mon = _make_mon()
         run_in_vm.return_value = MagicMock(ok=False, stdout="boom")
 
-        ext._enable_external_observability(
-            cfg, mon, _make_node("bm0"), _OFFER_URLS
-        )
+        with pytest.raises(RuntimeError):
+            ext._enable_external_observability(
+                cfg, mon, _make_node("bm0"), _OFFER_URLS
+            )
 
 
 # ---------------------------------------------------------------------------
-# _integrate_collectors
+# _model_exists / _model_owner / _parse_grafana_url
 # ---------------------------------------------------------------------------
-
-
-class TestIntegrateCollectors:
-    @patch("sunbeam_deployer.phases.external_observability.run_in_vm")
-    def test_same_controller_integrates_all_collectors(
-        self, run_in_vm: MagicMock
-    ) -> None:
-        cfg = _make_cfg()  # same controller
-        mon = _make_mon()
-        run_in_vm.return_value = MagicMock(ok=True, stdout="")
-
-        with patch.object(
-            ext, "_full_model_name", return_value="admin/openstack-machines"
-        ):
-            ext._integrate_collectors(cfg, mon, _make_node("bm0"), _OFFER_URLS)
-
-        cmds = [c.args[1] for c in run_in_vm.call_args_list]
-        assert "juju switch" not in cmds
-        # 3 targets x 3 offers = 9 integrations
-        assert len(cmds) == 9
-        assert any(
-            "juju integrate -m openstack "
-            "opentelemetry-collector-infra:send-remote-write "
-            "sunbeam-controller:u.prometheus" in c
-            for c in cmds
-        )
-        assert any(
-            "juju integrate -m admin/openstack-machines "
-            "opentelemetry-collector:send-remote-write "
-            "sunbeam-controller:u.prometheus" in c
-            for c in cmds
-        )
-
-    @patch("sunbeam_deployer.phases.external_observability.run_in_vm")
-    def test_separate_controller_switches_and_uses_named_offer_ref(
-        self, run_in_vm: MagicMock
-    ) -> None:
-        cfg = _make_cfg()
-        cfg.observability.external.controller = "cos-controller"
-        mon = _make_mon()
-        run_in_vm.return_value = MagicMock(ok=True, stdout="")
-
-        with patch.object(
-            ext, "_full_model_name", return_value="admin/openstack-machines"
-        ):
-            ext._integrate_collectors(cfg, mon, _make_node("bm0"), _OFFER_URLS)
-
-        cmds = [c.args[1] for c in run_in_vm.call_args_list]
-        assert "juju switch sunbeam-controller" in cmds
-        assert any(
-            "juju integrate -m admin/openstack-machines "
-            "opentelemetry-collector:send-remote-write "
-            "cos-controller:u.prometheus" in c
-            for c in cmds
-        )
-
-    @patch("sunbeam_deployer.phases.external_observability.run_in_vm")
-    def test_tolerates_integration_failure(self, run_in_vm: MagicMock) -> None:
-        cfg = _make_cfg()
-        mon = _make_mon()
-        run_in_vm.return_value = MagicMock(ok=False, stdout="boom")
-
-        with patch.object(
-            ext, "_full_model_name", return_value="admin/openstack-machines"
-        ):
-            ext._integrate_collectors(cfg, mon, _make_node("bm0"), _OFFER_URLS)
-
-        assert run_in_vm.call_count == 9
-
-
-# ---------------------------------------------------------------------------
-# _full_model_name / _model_exists / _model_owner / _parse_grafana_url
-# ---------------------------------------------------------------------------
-
-
-class TestFullModelName:
-    @patch("sunbeam_deployer.phases.external_observability.run_in_vm")
-    def test_resolves_owner(self, run_in_vm: MagicMock) -> None:
-        run_in_vm.return_value = MagicMock(
-            ok=True,
-            stdout=json.dumps(
-                {
-                    "models": [
-                        {
-                            "short-name": "openstack-machines",
-                            "name": "admin/openstack-machines",
-                        },
-                    ]
-                }
-            ),
-        )
-        assert (
-            ext._full_model_name(_make_node("bm0"), "openstack-machines")
-            == "admin/openstack-machines"
-        )
 
 
 class TestModelExists:

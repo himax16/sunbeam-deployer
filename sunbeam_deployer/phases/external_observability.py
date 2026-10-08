@@ -97,7 +97,6 @@ def run_phase(
         offer_urls = _create_offers(cfg, mon, primary)
         _register_controller(cfg, mon, primary)
         _enable_external_observability(cfg, mon, primary, offer_urls)
-        _integrate_collectors(cfg, mon, primary, offer_urls)
         _report_dashboard_url(cfg, mon, primary)
         _verify_features(cfg, mon, primary)
 
@@ -324,69 +323,11 @@ def _enable_external_observability(
             timeout=cfg.timeouts.observability_enable,
         )
         if not result.ok:
-            # TEMPORARY WORKAROUND: the snap's enable fails on the machine
-            # model; _integrate_collectors completes it below.
-            log.warning(
-                "sunbeam enable returned non-zero; completing the "
-                "collector integrations manually"
+            raise RuntimeError(
+                f"Failed to enable external observability: "
+                f"{result.stdout[-500:]}"
             )
         log.info("External observability enabled on %s", primary.hostname)
-
-
-def _integrate_collectors(
-    cfg: DeployConfig,
-    mon: DeploymentMonitor,
-    primary: ComputeNode,
-    offer_urls: tuple[str, str, str],
-) -> None:
-    """Integrate the collectors the snap's enable step misses.
-
-    TEMPORARY WORKAROUND — remove once the snap's enable is fixed (see
-    docs/external-observability-findings.md). Back-fills the infra collector
-    (pre-PR-#940 snaps) and the machine collector (``admin/openstack-machines``
-    short-name bug). Re-integrating the main collector is idempotent.
-    """
-    ext = cfg.observability.external
-    endpoints = (
-        "grafana-dashboards-provider",
-        "send-remote-write",
-        "send-loki-logs",
-    )
-    with mon.run_step(
-        PHASE,
-        "integrate-collectors",
-        "Integrate collectors with COS offers",
-    ):
-        if _is_separate(ext):
-            run_in_vm(
-                primary.name, "juju switch sunbeam-controller", stream=False
-            )
-        targets = (
-            ("openstack", "opentelemetry-collector"),
-            ("openstack", "opentelemetry-collector-infra"),
-            (
-                _full_model_name(primary, "openstack-machines"),
-                "opentelemetry-collector",
-            ),
-        )
-        for model, app in targets:
-            for endpoint, offer in zip(endpoints, offer_urls, strict=True):
-                offer_ref = f"{_controller_name(ext)}:{offer}"
-                result = run_in_vm(
-                    primary.name,
-                    f"juju integrate -m {model} {app}:{endpoint} {offer_ref}",
-                    stream=False,
-                    timeout=120,
-                )
-                if not result.ok:
-                    log.warning(
-                        "Integration %s %s:%s -> %s: %s",
-                        model,
-                        app,
-                        endpoint,
-                        offer_ref,
-                        result.stdout[-200:],
-                    )
 
 
 def _report_dashboard_url(
@@ -511,18 +452,6 @@ def _model_exists(primary: ComputeNode, model: str) -> bool:
         m.get("short-name") == model or m.get("name", "").endswith(model)
         for m in models
     )
-
-
-def _full_model_name(primary: ComputeNode, short_name: str) -> str:
-    """Return the ``owner/model`` name for *short_name*, falling back."""
-    result = run_in_vm(
-        primary.name, "juju models --format json", stream=False, timeout=120
-    )
-    models = _parse_json(result.stdout).get("models", []) if result.ok else []
-    for m in models:
-        if m.get("short-name") == short_name:
-            return m.get("name", short_name)
-    return short_name
 
 
 def _model_owner(primary: ComputeNode, model: str) -> str:
