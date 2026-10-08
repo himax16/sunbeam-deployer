@@ -28,7 +28,8 @@ uv run sunbeam-deployer
 
 ## How It Works
 
-The deployer runs four phases sequentially:
+The deployer runs the core deployment in four sequential phases (observability
+and external observability are separate optional phases — see [CLI Usage](#cli-usage)):
 
 ### Phase 0: Testflinger (optional)
 
@@ -294,7 +295,7 @@ Key settings:
 | `testflinger.reserve_timeout` | `259200` | Reservation timeout (3 days) |
 | `deploy_mode` | `manual` | `manual` (LXD-only) or `maas` |
 | `snap.source` | `store` | `store` or `local` |
-| `snap.channel` | `2026.1/edge` | Snap store channel |
+| `snap.channel` | `2024.1/edge` | Snap store channel |
 | `snap.install_method` | `dangerous` | `dangerous` or `try` (for local installs) |
 | `sunbeam.manifest` | `true` | Push Terraform-generated manifest to VMs |
 | `sunbeam.manifest_overrides` | `null` | Local YAML deep-merged into the manifest (per-charm channels for edge snaps) |
@@ -366,26 +367,6 @@ Configuration lives in [`tox.ini`](tox.ini).
 ```bash
 uv run ruff check --fix sunbeam_deployer/ tests/    # Auto-fix lint errors
 uv run ruff format sunbeam_deployer/ tests/         # Auto-format code
-```
-
-## Project Structure
-
-```text
-sunbeam_deployer/
-├── __init__.py          # Package metadata
-├── __main__.py          # CLI entry point (argparse, dispatch)
-├── commands.py          # Subcommand handlers (list-jobs)
-├── config.py            # Configuration loading + validation
-├── executor.py          # Command execution (host + LXD VMs)
-├── logger.py            # Dual file/terminal logging with secret redaction
-├── monitor.py           # Phase/step status tracking + summary
-├── phases/
-│   ├── testflinger.py   # Phase 0: Testflinger job submission + SSH setup
-│   ├── host_setup.py    # Phase 1: LXD + Terraform infrastructure
-│   ├── vm_deploy.py     # Phase 2: Snap install + node preparation
-│   └── cluster.py       # Phase 3: Bootstrap + join
-└── scripts/
-    └── host-setup.sh    # Standalone bash script for Phase 1
 ```
 
 ## Prerequisites
