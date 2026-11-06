@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import re
 
+import yaml
+
 from sunbeam_deployer.config import DeployConfig
 from sunbeam_deployer.executor import run_in_vm
 from sunbeam_deployer.monitor import DeploymentMonitor, Status
@@ -180,6 +182,41 @@ def _bootstrap(
         log.info("Cluster bootstrap completed on %s", node.hostname)
 
 
+def _cluster_member_hostnames(primary: ComputeNode) -> set[str]:
+    """Return hostnames of nodes already registered in the cluster.
+
+    ``sunbeam cluster list --format yaml`` is only usable once the cluster
+    has been bootstrapped. Any failure (cluster not bootstrapped, clusterd
+    unreachable) yields an empty set so the caller proceeds normally.
+    """
+    result = run_in_vm(
+        primary.name,
+        "sunbeam cluster list --format yaml",
+        timeout=60,
+        stream=False,
+    )
+    if not result.ok:
+        return set()
+
+    try:
+        data = yaml.safe_load(result.stdout) or {}
+    except yaml.YAMLError:
+        log.debug("Could not parse 'sunbeam cluster list' output")
+        return set()
+
+    if not isinstance(data, dict):
+        return set()
+    machines = data.get("openstack-machines", {})
+    if not isinstance(machines, dict):
+        return set()
+
+    return {
+        entry["hostname"]
+        for entry in machines.values()
+        if isinstance(entry, dict) and entry.get("hostname")
+    }
+
+
 def _join_node(
     cfg: DeployConfig,
     mon: DeploymentMonitor,
@@ -191,6 +228,13 @@ def _join_node(
     desc = f"Join {node.hostname} ({node.fqdn}) to cluster"
 
     with mon.run_step(PHASE, step_name, desc):
+        if node.hostname in _cluster_member_hostnames(primary):
+            log.info(
+                "%s is already a member of the cluster — skipping join",
+                node.hostname,
+            )
+            return
+
         # Step 1: Generate join token on the primary node
         log.info(
             "Generating join token for %s on %s", node.fqdn, primary.hostname

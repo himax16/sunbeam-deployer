@@ -136,6 +136,39 @@ class TestRunPhaseMultiNode:
         assert sum("cluster join" in c for c in cmds) == 2
 
     @patch("sunbeam_deployer.phases.cluster.run_in_vm")
+    def test_skips_node_already_in_cluster(self, mock_run: MagicMock) -> None:
+        """A node already in the cluster is not joined again."""
+        token = "eyJ0ZXN0IjoiYWJjZGVmMTIzNDU2Nzg5MCJ9"
+        members = (
+            "openstack-machines:\n"
+            "  '0':\n"
+            "    hostname: bm0\n"
+            "  '1':\n"
+            "    hostname: bm1\n"
+        )
+
+        def fake_run(vm: str, cmd: str, **kwargs: object) -> MagicMock:
+            if "cluster list" in cmd:
+                return MagicMock(ok=True, stdout=members)
+            if "cluster add" in cmd or "cluster join" in cmd:
+                return MagicMock(ok=True, stdout=f"token: {token}\n")
+            if "getent" in cmd:
+                return MagicMock(ok=True, stdout="192.168.0.10 host\n")
+            return MagicMock(ok=True, stdout="")
+
+        mock_run.side_effect = fake_run
+        cfg = _make_cfg(cluster_node_count=0)
+        mon = DeploymentMonitor()
+        infra = _make_infra("bm0", "bm1", "bm2")
+
+        run_phase(cfg, mon, infra)
+
+        cmds = [call.args[1] for call in mock_run.call_args_list]
+        assert sum("cluster add" in c for c in cmds) == 1
+        assert sum("cluster join" in c for c in cmds) == 1
+        assert not any("cluster add" in c and "bm1" in c for c in cmds)
+
+    @patch("sunbeam_deployer.phases.cluster.run_in_vm")
     def test_subset_join(self, mock_run: MagicMock) -> None:
         """With count=2, only first 2 nodes cluster."""
         token = "eyJ0ZXN0IjoiYWJjZGVmMTIzNDU2Nzg5MCJ9"
